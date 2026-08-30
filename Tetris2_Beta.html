@@ -1109,7 +1109,7 @@ class Game {
   this.pendingGarbage=[];
   this.garbageHole=rnd(COLS);
   this.over=false; this.won=false; this.paused=false; this.spectating=false;
-  this.stranded=false;
+  this.stranded=false; this.watched=false;
   this.resolved=false; this.pending=false; this.pendingAt=0;
   this.startedAt=now(); this.endedAt=0;
   this.pieceCount=0;
@@ -2161,6 +2161,17 @@ function resolveRound(){
  if(field.some(p=>p.done && !(p.ms>0)) && since < TIE_CAP) return;
  lose();
 }
+// a spectator has no round of their own to end: resolveRound() bails on them,
+// settleScore() is gated against them and no dead/win event is ever queued, so
+// nothing took them off the board when the match they were watching finished
+function watchRound(){
+ if(!G||!G.spectating||G.watched||G.stranded||!RoomClient.on) return;
+ const rv=RoomClient.view();
+ if(!rv.roster||rv.alive.length) return;
+ G.watched=true;
+ const watched=G;
+ setTimeout(()=>{ if(G!==watched) return; UI.showRoom(); dropBoard(); },RESULT_DELAY_MS);
+}
 // a hidden tab stops ticking, and nobody can be last standing while a frozen well counts as alive
 function dropOut(){
  if(!G || G.over || G.mode!=="versus") return;
@@ -2187,8 +2198,13 @@ function settleScore(){
 function startMatch(){
  if(G && G.mode==="versus" && !G.over) return;
  Net.lastB="";
- const meSeat=RoomClient.on ? RoomClient.view().seats.find(s=>s.pid===PID) : null;
- const spectating=!!(meSeat&&meSeat.spec);
+ const rv=RoomClient.on ? RoomClient.view() : null;
+ const meSeat=rv ? rv.seats.find(s=>s.pid===PID) : null;
+ // missing from the frozen roster means the round started without you. joining
+ // mid-match used to drop you into it with a fresh well: you could never win it
+ // on last-man-standing, but you could still come out top of the pending sort
+ // and take a round you were never part of
+ const spectating=!!(meSeat&&meSeat.spec) || !!(rv && rv.roster && !RoomState.inRound(rv,PID));
  if(RoomClient.on){
   // /live and /gb are wiped by the host in callStart(), before the go event
   // that got us here: deleting this seat's own /live from here instead raced
@@ -2200,16 +2216,18 @@ function startMatch(){
  }
  UI.renderRoom();
  UI.closeAll();
- startGame("versus");
- if(spectating){ G.spectating=true; G.over=true; }
+ // passed in, not assigned afterwards: startGame() can run a whole frame
+ // synchronously, and that frame treated the spectator as a live player
+ startGame("versus",spectating);
 }
 let rafId=0, lastT=0, sendAcc=0;
-function startGame(mode){
+function startGame(mode,spectating){
  clearTimeout(boardDrop); boardDrop=0;   // a fade still pending would null this new well
  clearTimeout(goTimer); goTimer=0;       // and a result card armed by the last run
  ;                             // and notes queued by the last run must not play over this one
  UI.hideGameOver(); UI.closePauseMenu();
  G=new Game(mode);
+ if(spectating){ G.spectating=true; G.over=true; }
  COUNT=3; countEnd=now()+3000; startHoldEnd=0;
  if(mode==="versus"){
   // RoomClient.starting is deliberately left alone: onRound() re-arms it right
@@ -2246,6 +2264,7 @@ function loop(t){
   }
   drainEvents();
   resolveRound();
+  watchRound();
   if(G.rule==="score" && G.over && !G.settled && !G.spectating && !G.stranded) settleScore();
  }
  FX.step(dt);
@@ -2793,8 +2812,10 @@ const RoomView = {
   if(btn){ btn.textContent=T(mySpec?"room_ready":(me&&me.rdy?"room_unready":"room_ready")); btn.classList.toggle("ready",!!(me&&me.rdy)); btn.disabled=active.length<2||mySpec; }
   const specBtn=$("#b-spectate");
   if(specBtn){
-   const othersInMatch=players.some(p=>p.pid!==PID && p.battling);
-   specBtn.hidden=!inRoom||(!mySpec&&!othersInMatch);   // only offered once a match is live (still shown to an active spectator so they can opt back out)
+   // offered for as long as you are in a room. gating it on a live match was
+   // circular: startMatch() reads the flag at the go signal, so the only window
+   // the button existed in was the one where setting it changed nothing
+   specBtn.hidden=!inRoom;
    specBtn.textContent=T(mySpec?"room_unspectate":"room_spectate");
    specBtn.classList.toggle("on",mySpec);
   }
@@ -3045,12 +3066,14 @@ const UI = {
  // a half-finished rebind, and the lobby poll that otherwise ran forever
  leaving(){ cancelBind(); clearInterval(this._rooms); this._rooms=0; },
  togglePause(){
-  if(!G || G.over) return;
+  if(!G || (G.over && !G.spectating)) return;
   if(this.pauseOpen) this.closePauseMenu();
   else this.openPauseMenu();
  },
  openPauseMenu(){
-  if(!G || G.over || this.pauseOpen) return;
+  // a spectator's game is over from the moment it starts, and that locked them
+  // out of the only control that leads back to the room
+  if(!G || (G.over && !G.spectating) || this.pauseOpen) return;
   if(G.mode!=="versus") G.paused=true;
   Input.reset();
   this.pauseOpen=true;
@@ -3074,6 +3097,9 @@ const UI = {
  quitToMenu(){
   this.pauseOpen=false;
   $("#pause-menu").classList.remove("on");
+  // a spectator has no round to abandon, so quitting one gives the room back
+  // rather than dropping the seat along with it
+  if(G && G.mode==="versus" && G.spectating && RoomClient.on){ G.watched=true; this.showRoom(); dropBoard(); return; }
   if(G && G.mode==="versus"){ this.leaveRoom(); return; }
   this.show("#v-home");
   dropBoard();
@@ -3262,7 +3288,15 @@ const UI = {
  },
  peerReady(v){ READY_P2P.peer=v; this.renderRoom(); if(READY_P2P.me&&READY_P2P.peer) startMatch(); },
  setSpectating(v){
-  if(RoomClient.on) RoomClient.setSpectating(v).catch(()=>{});
+  if(!RoomClient.on) return;
+  RoomClient.setSpectating(v).catch(()=>{});
+  // the seat flag alone only ever applied to the NEXT round, so clicking this
+  // during the match did nothing at all. leaving a round you are in forfeits
+  // it, and the others need the death published or they wait out the tie cap
+  if(!v || !G || G.mode!=="versus" || G.spectating || G.stranded) return;
+  if(!G.over){ G.die(); drainEvents(); }
+  G.spectating=true; G.resolved=true; G.pending=false;
+  this.hideGameOver();
  },
  renderRoom(){ RoomView.render(RoomClient.on?RoomClient.view():null); },
  renderChat(){
