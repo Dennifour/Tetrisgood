@@ -1,0 +1,3985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05060f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>TETRIS</title>
+<style>
+:root{--bg:#0a0a0c;--surface:#111113;--line:rgba(255,255,255,.14);--line-strong:rgba(255,255,255,.26);--fg:#ededf0;--fg-dim:#c4c4cc;--fg-faint:#9a9aa5;--danger:#e5484d;--radius:4px;--radius-sm:10px}
+*,*::before,*::after{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;height:100dvh;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg);color:var(--fg);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums;font-size:15px;user-select:none;-webkit-user-select:none;isolation:isolate}
+#stage{position:relative;height:100%;width:100%;touch-action:none;--gap:12px;--screen-w:300px;--screen-h:300px;--ctl:148px;--pad:168px;display:grid;align-items:center;justify-items:center;align-content:center;justify-content:center;padding:max(6px,env(safe-area-inset-top)) max(6px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));gap:var(--gap)}
+#screen{position:relative;width:var(--screen-w);height:var(--screen-h);overflow:hidden;opacity:0;transition:opacity .3s ease}
+#screen.live{opacity:1;transition:opacity .34s ease .1s}
+#screen canvas{display:block;width:100%;height:100%}
+#bg{position:fixed;inset:0;z-index:-1;background-size:cover;background-position:center;opacity:0;transition:opacity .3s ease}
+body.playing #bg{opacity:var(--bg-bright,.45)}
+.topbtns{position:fixed;z-index:14;top:max(5px,env(safe-area-inset-top));right:max(5px,env(safe-area-inset-right));display:flex;align-items:center;gap:9px}
+.topbtn{width:clamp(20px,3.6vmin,26px);height:clamp(20px,3.6vmin,26px);padding:0;border:0;background:none;cursor:pointer;color:var(--fg-faint);display:grid;place-items:center;transition:color .1s}
+.topbtn:hover,.topbtn:focus-visible{color:var(--fg);outline:none}
+.topbtn:active{color:var(--fg)}
+.topbtn svg{width:100%;height:100%;display:block}
+.topbtn path{fill:none;stroke:currentColor;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+@media (pointer:coarse){
+.mi{padding-block:10px}
+.mi.ghost{padding-block:9px}
+.topbtn{width:clamp(28px,5vmin,34px);height:clamp(28px,5vmin,34px)}
+.sw{width:48px;height:28px}
+.sw::after{width:20px;height:20px}
+.sw.on::after{transform:translateX(20px)}
+}
+.pausebtn{display:none}
+body.swipe.playing .pausebtn,body.notouch.playing .pausebtn{display:grid}
+#fsbtn[hidden]{display:none}
+body.land #stage{grid-template-columns:var(--pad) var(--screen-w) var(--pad);grid-template-areas:"dpad screen actions"}
+body.land.swap #stage{grid-template-areas:"actions screen dpad"}
+body.port #stage{grid-template-columns:1fr 1fr;grid-template-rows:auto auto;grid-template-areas:"screen screen" "dpad actions"}
+body.port.swap #stage{grid-template-areas:"screen screen" "actions dpad"}
+#screen{grid-area:screen;transform:translateY(var(--screen-y,0px))}
+#dpad-wrap{grid-area:dpad;transform:translate(calc(var(--shift-x,0px) * -1),var(--shift-y,0px))}
+#act-wrap{grid-area:actions;transform:translate(var(--shift-x,0px),var(--shift-y,0px))}
+#dpad-wrap,#act-wrap{opacity:0;visibility:hidden;transition:opacity .17s ease,visibility 0s .17s}
+body.swipe #dpad-wrap,body.swipe #act-wrap,body.notouch #dpad-wrap,body.notouch #act-wrap{display:none}
+body.playing #dpad-wrap,body.playing #act-wrap{opacity:1;visibility:visible;transition:opacity .26s ease .25s}
+body.over #dpad-wrap,body.over #act-wrap,body.over .pausebtn{opacity:0;visibility:hidden}
+body.swap #dpad-wrap{transform:translate(var(--shift-x,0px),var(--shift-y,0px))}
+body.swap #act-wrap{transform:translate(calc(var(--shift-x,0px) * -1),var(--shift-y,0px))}
+.pad{display:flex;flex-direction:column;align-items:center;gap:calc(var(--gap)*.85);width:100%;min-width:0}
+.dpad{position:relative;width:var(--ctl);height:var(--ctl);flex:0 0 auto}
+.dcross{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.dcross path{fill:none;stroke:var(--fg-dim);stroke-width:1.8;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.dpad b{position:absolute;display:grid;place-items:center;background:none;border:0;border-radius:0;color:var(--fg-dim);transition:color .08s,transform .08s}
+.dpad b svg{width:54%;height:54%;display:block}
+.dpad b svg path{fill:none;stroke:currentColor;stroke-width:1.8;vector-effect:non-scaling-stroke;stroke-linejoin:round;transition:fill .08s}
+.dpad b.l svg{transform:rotate(-90deg)}
+.dpad b.r svg{transform:rotate(90deg)}
+.dpad b.d svg{transform:rotate(180deg)}
+.dpad b.u{left:34%;top:0;width:32%;height:34%}
+.dpad b.d{left:34%;bottom:0;width:32%;height:34%}
+.dpad b.l{top:34%;left:0;height:32%;width:34%}
+.dpad b.r{top:34%;right:0;height:32%;width:34%}
+.abtn{width:calc(var(--ctl)*.44);height:calc(var(--ctl)*.44);border-radius:50%;flex:0 0 auto;display:grid;place-items:center;text-align:center;line-height:1.15;font-weight:600;letter-spacing:.05em;font-size:max(10px,calc(var(--ctl)*.115));color:var(--fg-dim);background:none;border:1.8px solid var(--fg-dim);transition:background .08s,border-color .08s,color .08s,transform .08s}
+.abtn.sm{width:calc(var(--ctl)*.44);height:calc(var(--ctl)*.21);border-radius:var(--radius);font-size:max(9px,calc(var(--ctl)*.082))}
+.actgrid{display:grid;grid-template-columns:calc(var(--ctl)*.44) calc(var(--ctl)*.44);grid-template-areas:". hold" "b a" ". pause";gap:calc(var(--ctl)*.1);justify-content:center;align-items:center}
+.actgrid .gh{grid-area:hold}
+.actgrid .gb{grid-area:b}
+.actgrid .ga{grid-area:a}
+.actgrid .gp{grid-area:pause}
+.dpad b.hit{color:var(--fg);transform:scale(.92)}
+.dpad b.hit svg path{fill:currentColor}
+.abtn.hit{background:var(--fg);border-color:var(--fg);color:var(--bg);transform:scale(.95)}
+.veil{--edge:max(16px,5vw);--col:min(460px,100%);position:fixed;inset:0;z-index:10;display:flex;justify-content:flex-start;height:var(--vvh,100dvh);padding:calc(env(safe-area-inset-top) + 16px) var(--edge) 16px;overflow:hidden auto;overscroll-behavior:contain;touch-action:pan-y;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .1s ease,visibility 0s .1s}
+.veil.on{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .15s ease}
+.pause-menu{--edge:max(16px,5vw);--col:min(460px,100%);position:fixed;inset:0;z-index:16;display:flex;justify-content:flex-start;height:var(--vvh,100dvh);padding:calc(env(safe-area-inset-top) + 16px) var(--edge) 16px;background:rgba(10,10,12,.94);overflow:hidden auto;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .16s ease,visibility 0s .16s}
+.pause-menu.on{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .16s ease}
+.pause-menu.versus #p-restart{display:none}
+.card{width:var(--col);margin-block:auto;padding-right:12px}
+.brand{font-weight:700;letter-spacing:-.01em;text-align:left;color:var(--fg);font-size:clamp(24px,6.4vmin,40px);margin:0 0 20px;text-transform:lowercase;line-height:1.2}
+html[lang=ko] .brand{letter-spacing:0}
+html[lang=ko] h3,html[lang=ko] .netstat{letter-spacing:.04em}
+.tag{text-align:left;color:var(--fg-dim);font-size:14.5px;margin:-12px 0 22px;line-height:1.55}
+h3{margin:30px 0 0;padding-bottom:9px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--fg-faint);font-weight:600;line-height:1.4}
+h3:first-of-type{margin-top:4px}
+.menu{display:grid;gap:2px}
+.mi{position:relative;display:block;text-align:left;cursor:pointer;width:fit-content;max-width:100%;padding:7px 16px;border:0;border-radius:999px;background:none;color:var(--fg);font-family:inherit;font-size:15.5px;font-weight:700;letter-spacing:0;line-height:1.35;text-transform:lowercase}
+.mi.nav{padding:.24em .65em;font-size:clamp(28px,6.2vmin,46px);line-height:1.3}
+.mi.nav::after{border-width:.07em}
+.mi.nav.ghost{font-size:14.5px;padding:6px 14px}
+.mi[hidden]{display:none}
+.mi::after{content:"";position:absolute;inset:0;border-radius:999px;border:1.5px solid #fff;pointer-events:none;opacity:0;transform:scale(.94)}
+.mi:focus-visible,.mi.navfocus,.mi.on,.mi:active,.mi.lit{outline:none}
+.mi:focus-visible::after,.mi.navfocus::after,.mi.on::after,.mi:active::after,.mi.lit::after{opacity:1;transform:none;transition:opacity .16s ease,transform .16s cubic-bezier(.2,.9,.25,1)}
+@media (hover:hover){.mi:hover::after{opacity:1;transform:none;transition:opacity .16s ease,transform .16s cubic-bezier(.2,.9,.25,1)}
+}
+.mi .sub{display:none}
+.mi.ctr{text-align:center;width:100%;max-width:440px}
+.mi.lang{text-transform:none}
+.mi.ghost{color:var(--fg-dim);font-weight:600;font-size:13.5px;padding:6px 14px}
+.mi[disabled]{opacity:.35;pointer-events:none}
+.mi.ctr[disabled].on{opacity:.9}
+.recs{display:grid;gap:16px}
+.rec{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+.rec .k{font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--fg-faint);font-weight:600;line-height:1.4}
+.rec .v{font-size:clamp(19px,4.6vmin,26px);font-weight:600;letter-spacing:.04em;color:var(--fg);white-space:nowrap;font-variant-numeric:tabular-nums}
+.rec.none .v{color:var(--fg-faint);font-size:clamp(14px,3.2vmin,16px)}
+#go-best{color:#4fe0a8;font-weight:700}
+@media (max-height:600px){.brand{margin-bottom:12px}
+.tag{margin-bottom:14px}
+.recs{gap:11px}
+.mi{padding:6px 14px}
+h3{margin-top:20px}
+.sp,.seat-row{padding:11px}
+}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mt8{margin-top:8px}
+.mt14{margin-top:14px}
+.mt16{margin-top:16px}
+.row>.mi{white-space:nowrap}
+.row>.mi.ctr{width:auto;flex:1 1 120px}
+input.tf,textarea.tf{display:block;width:100%;padding:14px 16px;border:1px solid var(--line);border-radius:var(--radius-sm,10px);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;letter-spacing:0;background:var(--surface);color:var(--fg-dim)}
+textarea.tf{height:92px;resize:none;line-height:1.5}
+.tf.box{max-width:560px}
+input.tf:focus,textarea.tf:focus{outline:none;color:var(--fg);border-color:var(--line-strong)}
+.hint{font-size:13px;color:var(--fg-faint);line-height:1.7;margin:13px 0 0}
+.bindrow{cursor:pointer;transition:background .12s;border-radius:8px}
+.bindrow b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;letter-spacing:.06em}
+.bindrow.binding b{color:var(--danger)}
+.bindrow:active,.bindrow:focus-visible{background:var(--surface);outline:none}
+.bindrow:focus-visible,.room-row:focus-visible,.chat-send:focus-visible,.sw:focus-visible{box-shadow:0 0 0 2px var(--fg);outline:none}
+@media (hover:hover){.bindrow:hover{background:var(--surface)}
+}
+#on-list{display:grid;grid-template-columns:minmax(0,1fr)}
+#on-list.has-rooms{border:1px solid var(--line);border-radius:var(--radius-sm,10px);overflow:hidden}
+.room-row{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:14px 18px;color:var(--fg);font-family:inherit;cursor:pointer}
+#on-list.has-rooms .room-row:first-child{border-top:0}
+.room-row:active{background:var(--surface)}
+@media (hover:hover){.room-row:hover{background:var(--surface)}
+}
+.room-row .nm{min-width:0;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:700}
+.room-row .sub{font-size:12.5px;color:var(--fg-faint);font-variant-numeric:tabular-nums;white-space:nowrap}
+.netstat{font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-faint);margin-top:18px;line-height:1.5}
+.netstat b{color:var(--fg);font-weight:600}
+.netstat b.bad{color:var(--danger)}
+.netstat b.wait{color:var(--fg-dim)}
+.diag{font-size:11px;letter-spacing:.06em;color:var(--fg-faint);margin:6px 0 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5}
+.sp{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:15px 0;border-top:1px solid var(--line);font-size:14.5px;line-height:1.5}
+.sp[hidden]{display:none}
+.sp span{color:var(--fg-dim);min-width:0}
+.sp b{flex:0 0 auto;text-align:right;font-weight:600;font-size:14px;color:var(--fg)}
+.sp small{display:block;margin-top:5px;color:var(--fg-faint);font-size:12.5px;line-height:1.5}
+.sp small[id]{opacity:.5}
+#v-set h3{font-size:13px}
+#v-set .fold summary h3{font-size:16.5px}
+#v-set .hint{font-size:15px}
+#v-set .sp{font-size:16.5px}
+#v-set .sp b{font-size:16px}
+#v-set .sp small{font-size:13.5px}
+#v-set input.tf,#v-set textarea.tf{font-size:14.5px}
+#v-set .netstat{font-size:13px}
+#v-set .diag{font-size:12.5px}
+.sw{-webkit-appearance:none;appearance:none;padding:0;margin:0;width:42px;height:24px;border-radius:999px;background:var(--surface);border:1px solid var(--line);position:relative;cursor:pointer;flex:0 0 auto;transition:background .12s,border-color .12s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--fg-faint);transition:transform .12s,background .12s}
+.sw.on{border-color:var(--fg)}
+.sw.on::after{transform:translateX(18px);background:var(--fg)}
+input[type=range]{-webkit-appearance:none;appearance:none;height:1px;flex:0 0 44%;background:var(--line-strong);outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--fg);cursor:pointer;border:0}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--fg);cursor:pointer;border:0}
+.split .rail{display:grid;gap:2px;margin-bottom:6px}
+.split .panel-back{display:none}
+@media (max-width:759px){.split .panel-area{display:none}
+.split.panel-open .rail,.split.panel-open>h3:first-child{display:none}
+.split.panel-open .panel-area{display:block}
+.split.panel-open .panel-back{display:inline-block;margin-bottom:8px}
+}
+@media (min-width:760px){#v-set .card,#v-lobby .card{width:min(1100px,92vw);margin-block:auto}
+.split{display:grid;grid-template-columns:180px 1fr;gap:8px 40px;align-items:center;height:min(620px,calc(100vh - 160px));overflow:hidden}
+.split .panel-area{height:100%;overflow-y:auto;display:flex;flex-direction:column;justify-content:safe center}
+#v-set .card{width:min(1300px,92vw)}
+#v-set .split,#v-lobby .split{grid-template-columns:280px 1fr}
+}
+.panel{display:none}
+.panel.on{display:block;animation:panelin .26s cubic-bezier(.2,.9,.25,1)}
+@keyframes panelin{from{opacity:0;transform:translateY(7px)}
+to{opacity:1;transform:none}
+}
+.panel h3{margin:32px 0 0;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.panel h3:first-child{margin-top:4px}
+.panel .hint{margin-top:11px}
+.fold summary{display:block;cursor:pointer;list-style:none}
+.fold summary::-webkit-details-marker{display:none}
+.fold summary h3{display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:15px;font-weight:800;letter-spacing:.10em;color:var(--fg-dim);padding-bottom:12px}
+html[lang=ko] .fold summary h3{letter-spacing:.02em}
+.fold summary h3::after{content:"";flex:none;width:.42em;height:.42em;margin-bottom:.14em;border-right:2.4px solid currentColor;border-bottom:2.4px solid currentColor;transform:rotate(45deg);transition:transform .2s ease;opacity:.7}
+.fold[open] summary h3::after{transform:rotate(-135deg);opacity:1}
+.fold[open] summary h3{color:var(--fg)}
+.foldbody{overflow:hidden;transition:height .3s cubic-bezier(.2,.9,.25,1)}
+.fold summary:focus-visible h3,.fold summary:active h3{color:var(--fg)}
+@media (hover:hover){.fold summary:hover h3{color:var(--fg)}
+.fold summary:hover h3::after{opacity:1}
+}
+.opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0 clamp(18px,4.4vw,46px)}
+.opts .sp{border-top:0;padding:13px 0}
+.opts.lined .sp{border-top:1px solid var(--line)}
+.opts .sp.rng{display:block;padding:14px 0 16px}
+.tile-label{display:flex;align-items:center;gap:10px}
+.tile-swatch{width:22px;height:22px;border-radius:5px;flex:0 0 auto;background-size:cover;background-position:center}
+.tile-actions{display:flex;align-items:center;gap:4px;flex:0 0 auto}
+.tile-actions .mi{padding:5px 12px;font-size:13px}
+.opts .sp.rng input[type=range]{display:block;width:100%;flex:none;margin-top:13px}
+.opts .full{grid-column:1/-1}
+.opts .full.row{margin-top:6px}
+@media (max-height:600px){.panel h3{margin-top:22px}
+.opts .sp{padding:10px 0}
+.opts .sp.rng{padding:11px 0 13px}
+}
+#v-room .card{width:100%;max-width:none;display:flex;flex-direction:column;gap:16px}
+.dash-head{display:flex;align-items:center;gap:16px 24px;flex-wrap:wrap}
+.dash-head .hint{margin:0;flex:1 1 220px}
+.dash-grid{display:grid;gap:16px;grid-template-columns:minmax(0,1fr);min-height:0}
+.dash-panel{display:flex;flex-direction:column;gap:10px;min-width:0;border:1px solid var(--line);border-radius:var(--radius-sm,10px);background:var(--surface);padding:14px}
+.panel-label{flex:0 0 auto;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-faint)}
+.seat-grid{display:grid;gap:6px;grid-template-columns:minmax(0,1fr)}
+.seat-row{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:var(--radius-sm,10px);padding:8px 12px;background:var(--bg)}
+.seat-row.mine{border-color:var(--line-strong)}
+.seat-row.ready{border-color:#4fe0a8}
+.seat-row.battling{border-color:#5fb0ff}
+.seat-row.spectating{opacity:.6}
+.seat-row .w{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.seat-row .w small{margin-left:5px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-faint);font-weight:600}
+.seat-row .nm{min-width:0;flex:1 1 auto;font-size:12.5px;font-weight:600;color:var(--fg-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seat-row.ready .nm{color:#4fe0a8}
+.seat-row.battling .nm{color:#5fb0ff}
+.match-panel .row{width:100%}
+.ready-row{width:100%}
+.ready-row>.mi{flex:1 1 0}
+#b-ready,#b-spectate{text-align:center;border:1.5px solid var(--line-strong);padding-inline:.4em}
+#b-ready.ready{border-color:#4fe0a8;color:#4fe0a8}
+#b-spectate.on{border-color:var(--fg);color:var(--fg)}
+#b-ready.on::after,#b-ready:active::after,#b-spectate.on::after,#b-spectate:active::after{opacity:0}
+.room-chat{padding:0;overflow:hidden;height:320px}
+.room-chat .panel-label{padding:12px 16px;border-bottom:1px solid var(--line)}
+.chat-log{flex:1 1 auto;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:10px}
+.chat-log .empty,.seat-grid .empty{margin:auto;color:var(--fg-faint);font-size:13px}
+.seat-grid .empty{grid-column:1/-1;padding:6px 2px}
+.chat-log .msg{max-width:80%}
+.chat-log .msg.mine{align-self:flex-end;text-align:right}
+.chat-log .msg .who{font-size:11px;font-weight:700;color:var(--fg-faint);margin-bottom:3px;overflow-wrap:anywhere}
+.chat-log .msg .txt{display:inline-block;max-width:100%;font-size:14px;line-height:1.4;background:var(--bg);border-radius:12px;padding:8px 12px;overflow-wrap:anywhere;word-break:break-word}
+.chat-log .msg.mine .txt{background:#fff;color:#0a0a0c}
+.room-chat .chat-compose{display:flex;gap:8px;flex:0 0 auto;padding:12px;border-top:1px solid var(--line)}
+.room-chat .chat-compose input.tf{flex:1 1 auto}
+.chat-send{flex:0 0 auto;width:44px;height:44px;border-radius:var(--radius-sm,10px);border:1px solid var(--line);background:var(--surface);color:var(--fg-dim);display:grid;place-items:center;cursor:pointer}
+.chat-send svg{width:17px;height:17px;fill:currentColor}
+.chat-send:hover{color:var(--fg);border-color:var(--line-strong)}
+@media (min-width:760px){.dash-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto auto;grid-template-areas:"seats chat" "match chat"}
+.seats-panel{grid-area:seats}
+.match-panel{grid-area:match;justify-content:center}
+.room-chat{grid-area:chat}
+.seat-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+}
+@media (prefers-reduced-motion:reduce){.veil,.mi,.mi::after{transition-duration:.01ms;transition-delay:0s}
+.panel.on{animation-duration:.01ms}
+.fold summary h3::after{transition-duration:.01ms}
+.foldbody{transition-duration:.01ms}
+}
+</style>
+</head>
+<body>
+<div class="topbtns">
+ <button id="pausebtn" class="topbtn pausebtn" type="button" data-i18n-aria="btn_pause">
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.5 5v14M14.5 5v14"/></svg>
+ </button>
+ <button id="fsbtn" class="topbtn" type="button" hidden data-i18n-aria="btn_full">
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+   <path d="M9 3H5.5A2.5 2.5 0 0 0 3 5.5V9M15 3h3.5A2.5 2.5 0 0 1 21 5.5V9M9 21H5.5A2.5 2.5 0 0 1 3 18.5V15M15 21h3.5a2.5 2.5 0 0 0 2.5-2.5V15"/>
+  </svg>
+ </button>
+</div>
+<div id="bg"></div>
+<div id="stage" role="main">
+ <div id="screen"><canvas id="cv" role="img" data-i18n-aria="a11y_board"></canvas></div>
+ <div id="dpad-wrap" class="pad">
+  <div class="dpad">
+   <svg class="dcross" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+    <path d="M34 1H66V34H99V66H66V99H34V66H1V34H34Z"/>
+   </svg>
+   <b class="u" data-k="hardDrop"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7 19 17H5Z"/></svg></b>
+   <b class="l" data-k="left"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7 19 17H5Z"/></svg></b>
+   <b class="r" data-k="right"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7 19 17H5Z"/></svg></b>
+   <b class="d" data-k="softDrop"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7 19 17H5Z"/></svg></b>
+  </div>
+ </div>
+ <div id="act-wrap" class="pad">
+  <div class="actgrid">
+   <div class="abtn sm gh" data-k="hold" data-i18n="btn_hold"></div>
+   <div class="abtn b gb" data-k="rotL">B</div>
+   <div class="abtn a ga" data-k="rotR">A</div>
+   <div class="abtn sm gp" data-k="pause" data-i18n="btn_pause"></div>
+  </div>
+ </div>
+</div>
+<div class="pause-menu" id="pause-menu">
+ <div class="card">
+  <div class="menu">
+   <button class="mi nav" id="p-resume" data-i18n="pause_resume"></button>
+   <button class="mi nav" id="p-restart" data-i18n="pause_restart"></button>
+   <button class="mi nav" id="p-quit" data-i18n="pause_quit"></button>
+  </div>
+ </div>
+</div>
+<div class="pause-menu" id="game-over">
+ <div class="card">
+  <h1 class="brand" id="go-title"></h1>
+  <p class="tag" id="go-best" data-i18n="go_best" hidden></p>
+  <div class="recs" id="go-stats"></div>
+  <div class="menu mt16">
+   <button class="mi nav ghost" id="go-menu" data-i18n="go_menu"></button>
+  </div>
+ </div>
+</div>
+<div class="veil on" id="v-home">
+ <div class="card">
+  <div class="menu">
+   <button class="mi nav" data-go="play"><span data-i18n="m_play"></span></button>
+   <button class="mi nav" data-go="settings"><span data-i18n="m_settings"></span></button>
+  </div>
+ </div>
+</div>
+<div class="veil" id="v-play">
+ <div class="card">
+  <div class="menu">
+   <button class="mi nav" data-go="solo"><span data-i18n="m_solo"></span></button>
+   <button class="mi nav" data-go="sprint"><span data-i18n="m_sprint"></span></button>
+   <button class="mi nav" data-go="speed"><span data-i18n="m_speed"></span></button>
+   <button class="mi nav" data-go="versus"><span data-i18n="m_versus"></span></button>
+   <button class="mi nav" data-go="records"><span data-i18n="m_records"></span></button>
+  </div>
+  <div class="menu mt16"><button class="mi nav ghost" data-back="1" data-i18n="back"></button></div>
+ </div>
+</div>
+<div class="veil" id="v-speed">
+ <div class="card">
+  <div class="menu">
+   <button class="mi nav" data-speed="easy"><span data-i18n="sp_easy"></span></button>
+   <button class="mi nav" data-speed="normal"><span data-i18n="sp_normal"></span></button>
+   <button class="mi nav" data-speed="hard"><span data-i18n="sp_hard"></span></button>
+  </div>
+  <p class="hint" data-i18n="sp_hint"></p>
+  <div class="menu mt16"><button class="mi nav ghost" data-back="1" data-i18n="back"></button></div>
+ </div>
+</div>
+<div class="veil" id="v-records">
+ <div class="card">
+  <h1 class="brand" data-i18n="rec_t"></h1>
+  <p class="tag" data-i18n="rec_tag"></p>
+  <div class="recs" id="rec-list"></div>
+  <div class="menu mt16"><button class="mi nav ghost" data-back="1" data-i18n="back"></button></div>
+ </div>
+</div>
+<div class="veil" id="v-lobby">
+ <div class="card">
+  <div class="split" id="lobby-split">
+   <button class="mi ghost panel-back" type="button" id="lobby-panelback">&larr; <span data-i18n="lob_t"></span></button>
+   <div class="menu rail" id="lobby-rail">
+    <button class="mi nav on" data-panel="server"><span data-i18n="lob_server"></span></button>
+    <button class="mi nav" data-panel="p2p"><span data-i18n="lob_p2p"></span></button>
+    <button class="mi nav ghost mt16" data-back="1" data-i18n="back"></button>
+   </div>
+   <div class="panel-area">
+    <section class="panel on" data-panel="server">
+     <h3 data-i18n="srv_list"></h3>
+     <div id="on-list"></div>
+     <div class="menu mt16"><button class="mi nav" id="b-mkroom"><span data-i18n="srv_make"></span></button></div>
+     <p class="hint" id="srv-hint"></p>
+    </section>
+    <section class="panel" data-panel="p2p">
+     <p class="tag" data-i18n="net_tag"></p>
+     <div class="menu">
+      <button class="mi nav" data-go="host"><span data-i18n="lob_host"></span></button>
+      <button class="mi nav" data-go="join"><span data-i18n="lob_join"></span></button>
+     </div>
+    </section>
+   </div>
+  </div>
+  <p class="hint" id="lob-hint"></p>
+ </div>
+</div>
+<div class="veil" id="v-host">
+ <div class="card">
+  <h1 class="brand" data-i18n="host_t"></h1>
+  <p class="tag" data-i18n="net_tag"></p>
+  <h3 data-i18n="host_s1"></h3>
+  <textarea class="tf" id="h-out" readonly data-i18n-ph="ph_gen"></textarea>
+  <div class="menu mt8"><button class="mi" id="h-copy" data-i18n="host_copy"></button></div>
+  <h3 data-i18n="host_s2"></h3>
+  <textarea class="tf" id="h-in" data-i18n-ph="ph_reply"></textarea>
+  <div class="menu mt8"><button class="mi" id="h-connect" data-i18n="host_connect"></button></div>
+  <div class="netstat"><span data-i18n="status"></span> <b class="wait" id="hs">—</b></div>
+  <p class="diag" id="h-diag"></p>
+  <p class="hint" id="h-hint" data-i18n="host_hint"></p>
+  <div class="menu mt14"><button class="mi nav ghost" data-back="1" data-i18n="cancel"></button></div>
+ </div>
+</div>
+<div class="veil" id="v-join">
+ <div class="card">
+  <h1 class="brand" data-i18n="join_t"></h1>
+  <p class="tag" data-i18n="net_tag"></p>
+  <h3 data-i18n="join_s1"></h3>
+  <textarea class="tf" id="j-in" data-i18n-ph="ph_host"></textarea>
+  <div class="menu mt8"><button class="mi" id="j-go" data-i18n="join_make"></button></div>
+  <h3 data-i18n="join_s2"></h3>
+  <textarea class="tf" id="j-out" readonly data-i18n-ph="ph_gen"></textarea>
+  <div class="menu mt8"><button class="mi" id="j-copy" data-i18n="join_copy"></button></div>
+  <div class="netstat"><span data-i18n="status"></span> <b class="wait" id="js">—</b></div>
+  <p class="diag" id="j-diag"></p>
+  <p class="hint" id="j-hint" data-i18n="join_hint"></p>
+  <div class="menu mt14"><button class="mi nav ghost" data-back="1" data-i18n="cancel"></button></div>
+ </div>
+</div>
+<div class="veil" id="v-room">
+ <div class="card">
+  <div class="dash-head">
+   <button class="mi nav ghost room-leave" id="b-leave" data-i18n="room_leave"></button>
+   <p class="hint" id="room-hint" data-i18n="room_hint"></p>
+  </div>
+  <div class="dash-grid">
+   <section class="dash-panel seats-panel">
+    <div class="panel-label" data-i18n="room_players"></div>
+    <div class="seat-grid" id="seatlist"></div>
+   </section>
+   <section class="dash-panel match-panel">
+    <div class="panel-label" data-i18n="room_match"></div>
+    <div class="row" id="rulerow">
+     <button class="mi ctr rule" type="button" data-rule="attack" data-i18n="rule_attack"></button>
+     <button class="mi ctr rule" type="button" data-rule="score" data-i18n="rule_score"></button>
+    </div>
+    <p class="hint" id="rule-hint"></p>
+    <div class="row ready-row" id="readyrow">
+     <button class="mi nav ready" id="b-ready" data-i18n="room_ready"></button>
+     <button class="mi nav spectate" id="b-spectate" data-i18n="room_spectate"></button>
+    </div>
+   </section>
+   <section class="dash-panel room-chat">
+    <div class="panel-label"><span data-i18n="chat_t"></span></div>
+    <div class="chat-log" id="chat-log"></div>
+    <form class="chat-compose" id="chatbar">
+     <input class="tf" id="chat-in" maxlength="120" autocomplete="off" data-i18n-ph="ph_chat">
+     <button class="chat-send" id="chat-send" type="submit" data-i18n-aria="chat_send">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10.2 15 12 3.4 13.8Z"/></svg>
+     </button>
+    </form>
+   </section>
+  </div>
+ </div>
+</div>
+<div class="veil" id="v-set">
+ <div class="card">
+  <div class="split" id="set-split">
+   <button class="mi ghost panel-back" type="button" id="set-panelback">&larr; <span data-i18n="c_settings"></span></button>
+   <div class="menu rail" id="set-rail" role="tablist">
+    <button class="mi nav on" data-tab="general" role="tab" aria-selected="true" aria-controls="panel-general"><span data-i18n="c_general"></span></button>
+    <button class="mi nav" data-tab="video" role="tab" aria-selected="false" aria-controls="panel-video"><span data-i18n="c_video"></span></button>
+    <button class="mi nav" data-tab="audio" role="tab" aria-selected="false" aria-controls="panel-audio"><span data-i18n="c_audio"></span></button>
+    <button class="mi nav" data-tab="controls" role="tab" aria-selected="false" aria-controls="panel-controls"><span data-i18n="c_controls"></span></button>
+    <button class="mi nav" data-tab="online" role="tab" aria-selected="false" aria-controls="panel-online"><span data-i18n="c_net"></span></button>
+    <button class="mi nav ghost mt16" data-back="1" data-i18n="back"></button>
+   </div>
+   <div class="panel-area">
+    <section class="panel on" data-panel="general" role="tabpanel" id="panel-general">
+     <h3 data-i18n="set_lang"></h3>
+     <div class="row" id="langrow">
+      <button class="mi ctr lang" data-lang="en">English</button>
+      <button class="mi ctr lang" data-lang="ko">한국어</button>
+     </div>
+     <h3 data-i18n="set_id"></h3>
+     <input class="tf box" id="s-name" maxlength="12" data-i18n-ph="ph_name">
+     <p class="hint" data-i18n="set_id_hint"></p>
+     <h3 data-i18n="set_data"></h3>
+     <div class="row">
+      <button class="mi ctr" type="button" id="b-export" data-i18n="set_export"></button>
+      <button class="mi ctr" type="button" id="b-import" data-i18n="set_import"></button>
+     </div>
+     <input type="file" id="s-import" accept="application/json,.json" hidden>
+     <p class="hint" id="data-hint" data-i18n="set_data_hint"></p>
+    </section>
+    <section class="panel" data-panel="video" role="tabpanel" id="panel-video">
+     <h3 data-i18n="set_pres"></h3>
+     <div class="opts">
+      <div class="sp"><span data-i18n="set_ghost"></span><button type="button" role="switch" aria-checked="false" class="sw on" id="s-ghost"></button></div>
+      <div class="sp"><span data-i18n="set_grid"></span><button type="button" role="switch" aria-checked="false" class="sw on" id="s-grid"></button></div>
+      <div class="sp"><span data-i18n="set_bob"></span><button type="button" role="switch" aria-checked="false" class="sw on" id="s-bob"></button></div>
+      <div class="sp rng"><span><span data-i18n="set_boardsize"></span><small id="l-boardsize"></small></span><input type="range" data-i18n-aria="set_boardsize" id="s-boardsize" min="40" max="100" step="5"></div>
+     </div>
+     <h3 data-i18n="set_tiles"></h3>
+     <p class="hint" data-i18n="set_tiles_hint"></p>
+     <div class="opts tiles" id="tile-rows"></div>
+     <h3 data-i18n="set_presets"></h3>
+     <p class="hint" data-i18n="set_presets_hint"></p>
+     <div class="opts" id="preset-rows"></div>
+    </section>
+    <section class="panel" data-panel="audio" role="tabpanel" id="panel-audio">
+     <h3 data-i18n="set_sound"></h3>
+     <p class="hint" data-i18n="set_sound_hint"></p>
+    </section>
+    <section class="panel" data-panel="controls" role="tabpanel" id="panel-controls">
+     <h3 data-i18n="set_handling"></h3>
+     <div class="opts">
+      <div class="sp rng"><span><span data-i18n="set_das"></span><small id="l-das"></small></span><input type="range" data-i18n-aria="set_das" id="s-das" min="40" max="400" step="10"></div>
+      <div class="sp rng"><span><span data-i18n="set_arr"></span><small id="l-arr"></small></span><input type="range" data-i18n-aria="set_arr" id="s-arr" min="0" max="160" step="5"></div>
+      <div class="sp rng"><span><span data-i18n="set_sdf"></span><small id="l-sdf"></small></span><input type="range" data-i18n-aria="set_sdf" id="s-sdf" min="2" max="40" step="1"></div>
+     </div>
+     <details class="fold" id="fold-touch">
+     <summary><h3 data-i18n="c_touch"></h3></summary>
+     <div class="foldbody">
+     <div class="row">
+      <button class="mi ctr tmode" data-touch="dpad" data-i18n="set_dpad"></button>
+      <button class="mi ctr tmode" data-touch="swipe" data-i18n="set_swipe"></button>
+      <button class="mi ctr tmode" data-touch="off" data-i18n="set_off"></button>
+     </div>
+     <p class="hint" id="touch-hint"></p>
+     <div id="swipe-opts" hidden>
+      <div class="opts">
+       <div class="sp rng"><span><span data-i18n="set_swmove"></span><small id="l-swmove"></small></span><input type="range" data-i18n-aria="set_swmove" id="s-swmove" min="30" max="160" step="5"></div>
+       <div class="sp rng"><span><span data-i18n="set_swdrop"></span><small id="l-swdrop"></small></span><input type="range" data-i18n-aria="set_swdrop" id="s-swdrop" min="30" max="160" step="5"></div>
+       <div class="sp rng"><span><span data-i18n="set_swflick"></span><small id="l-swflick"></small></span><input type="range" data-i18n-aria="set_swflick" id="s-swflick" min="40" max="260" step="10"></div>
+       <div class="full row"><button class="mi ghost" id="b-swreset" data-i18n="set_swreset"></button></div>
+      </div>
+     </div>
+     <div id="dpad-opts">
+      <div class="opts">
+       <div class="sp"><span><span data-i18n="set_swap"></span><small data-i18n="set_swap_s"></small></span><button type="button" role="switch" aria-checked="false" class="sw" id="s-swap"></button></div>
+       <div class="sp rng"><span><span data-i18n="set_btnsize"></span><small id="l-btn"></small></span><input type="range" data-i18n-aria="set_btnsize" id="s-btn" min="70" max="140" step="5"></div>
+       <div class="sp rng"><span><span data-i18n="set_btny"></span><small id="l-bty"></small></span><input type="range" data-i18n-aria="set_btny" id="s-bty" min="-100" max="100" step="10"></div>
+       <div class="sp rng"><span><span data-i18n="set_btnx"></span><small id="l-btx"></small></span><input type="range" data-i18n-aria="set_btnx" id="s-btx" min="-100" max="100" step="10"></div>
+       <div class="full row"><button class="mi ghost" id="b-ctlreset" data-i18n="set_ctlreset"></button></div>
+      </div>
+     </div>
+     </div>
+     </details>
+     <details class="fold" id="fold-keys">
+      <summary><h3 data-i18n="c_keys"></h3></summary>
+      <div class="foldbody">
+       <div class="opts lined" id="keylist"></div>
+       <p class="hint" data-i18n="set_bind_hint"></p>
+       <div class="row mt8"><button class="mi ghost" id="b-keyreset" data-i18n="set_reset_keys"></button></div>
+      </div>
+     </details>
+     <details class="fold" id="fold-pad">
+      <summary><h3 data-i18n="c_pad"></h3></summary>
+      <div class="foldbody">
+      <div class="opts">
+       <div class="sp"><span><span data-i18n="set_paduse"></span><small id="pad-state"></small></span><button type="button" role="switch" aria-checked="false" class="sw" id="s-padon"></button></div>
+      </div>
+      <div class="opts lined" id="padlist"></div>
+      <p class="hint" data-i18n="set_padbind_hint"></p>
+      <div class="row mt8"><button class="mi ghost" id="b-padreset" data-i18n="set_reset_pad"></button></div>
+      </div>
+     </details>
+    </section>
+    <section class="panel" data-panel="online" role="tabpanel" id="panel-online">
+     <h3 data-i18n="set_sig"></h3>
+     <input class="tf box" id="s-fb" autocapitalize="off" autocomplete="off" spellcheck="false" data-i18n-ph="ph_fb">
+     <p class="hint" data-i18n="set_sig_hint"></p>
+    </section>
+   </div>
+  </div>
+ </div>
+</div>
+<script>
+"use strict";
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const STAGE = $("#stage");
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+const now = () => performance.now();
+const rnd = n => Math.floor(Math.random()*n);
+const isCoarse = () => matchMedia("(pointer:coarse)").matches && matchMedia("(hover:none)").matches;
+// localStorage, prefixed tfx:. set() reports failure so a quota-blown write can be undone.
+const store = {
+ get(k,d){ try{ const v=localStorage.getItem("tfx:"+k); return v===null?d:JSON.parse(v);}catch(e){return d;} },
+ set(k,v){ try{ localStorage.setItem("tfx:"+k,JSON.stringify(v)); return true; }catch(e){ return false; } },
+ del(k){ try{ localStorage.removeItem("tfx:"+k); }catch(e){} }
+};
+["turnUrl","turnUser","turnPass","fbUse"].forEach(k=>store.del(k));
+const THEMES = [
+ { id:"default", background:null,
+  font:"ui-sans-serif,system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif",
+  skin:"classic", lineClearFx:"dissolve", boardColor:"#ffffff",
+  textColor:"#ededf0", soundFx:"default" },
+];
+const CFG = {
+ das:   store.get("das",170),
+ arr:   store.get("arr",60),
+ sdf:   store.get("sdf",8),
+ snd:   store.get("snd",true),
+ vol:   store.get("vol",100),
+ bob:   store.get("bob", store.get("shake",true)),
+ ghost: store.get("ghost",true),
+ grid:  store.get("grid",false),
+ theme: store.get("theme","default"),
+ bgBright: store.get("bgBright",45),
+ swap:  store.get("swap",false),
+ btnScale: store.get("btnScale",1),
+ boardScale: store.get("boardScale",0.7),
+ btnY:  store.get("btnY",0),
+ btnX:  store.get("btnX",0),
+ fbUrl: store.get("fbUrl",""),
+ tiles: store.get("tiles",null) || {},
+ presets: store.get("presets",null) || [],
+ touch: store.get("touch", isCoarse()?"swipe":"off"),
+ touchSet: store.get("touchSet",false),
+ swMove: store.get("swMove",80),
+ swDrop: store.get("swDrop",70),
+ swFlick:store.get("swFlick",110),
+ keys:  store.get("keys",null),
+ pads:  store.get("pads",null),
+ padOn: store.get("padOn",true),
+ speedDiff: store.get("speedDiff","normal"),
+ lang:  store.get("lang", /^ko/i.test(navigator.language||"") ? "ko" : "en"),
+ name:  store.get("name","") || ("PLAYER"+rnd(900+100))
+};
+store.del("shake");
+store.del("uiTheme");
+store.del("fullscreen");
+["round","fx"].forEach(k=>store.del(k));
+store.del("clearfx");
+store.del("skin");
+store.del("bg");
+["grColor1","grColor2","grColor3","grMotion","grSpeed","grBright"].forEach(k=>store.del(k));
+if(!THEMES.some(t=>t.id===CFG.theme)) CFG.theme=THEMES[0].id;
+// writes every key, which is why retired ones are store.del()'d above
+const saveCfg = () => { for(const k in CFG) store.set(k,CFG[k]); };
+let THEME = THEMES.find(t=>t.id===CFG.theme) || THEMES[0];
+let CANVAS_FONT = THEME.font;
+function applyTheme(){
+ THEME = THEMES.find(t=>t.id===CFG.theme) || THEMES[0];
+ CANVAS_FONT = THEME.font;
+ INK.frame = THEME.boardColor;
+ INK.fg    = THEME.textColor;
+ INK.dim   = rgba(THEME.textColor,.82);
+ INK.faint = rgba(THEME.textColor,.65);
+ applyBg();
+}
+function applyBg(){
+ $("#bg").style.backgroundImage = THEME.background ? "url("+THEME.background+")" : "none";
+ document.documentElement.style.setProperty("--bg-bright", CFG.bgBright/100);
+}
+const REC = {
+ marathon: store.get("recMarathon",0),
+ sprint:   store.get("recSprint",0),
+ wins:     store.get("recWins",0),
+ speed:    Object.assign({easy:0,normal:0,hard:0}, store.get("recSpeed",null)||{})
+};
+const saveRec = () => {
+ store.set("recMarathon",REC.marathon); store.set("recSprint",REC.sprint);
+ store.set("recWins",REC.wins); store.set("recSpeed",REC.speed);
+};
+const SAVE_VERSION=1;
+const Backup = {
+ make(){ return {v:SAVE_VERSION, at:new Date().toISOString(), cfg:CFG, rec:REC}; },
+ // validated whole before anything is written: a half-applied import would
+ // leave settings and records disagreeing with each other
+ check(text){
+  let d;
+  try{ d=JSON.parse(text); }catch(e){ throw new Error(T("e_badfile")); }
+  if(!d||typeof d!=="object"||!d.cfg||typeof d.cfg!=="object") throw new Error(T("e_badfile"));
+  if((d.v|0)>SAVE_VERSION) throw new Error(T("e_newfile"));
+  return d;
+ },
+ apply(d){
+  for(const k in CFG) if(k in d.cfg) CFG[k]=d.cfg[k];
+  if(d.rec && typeof d.rec==="object"){
+   REC.marathon=+d.rec.marathon||0; REC.sprint=+d.rec.sprint||0; REC.wins=+d.rec.wins||0;
+   REC.speed=Object.assign({easy:0,normal:0,hard:0}, d.rec.speed||{});
+   saveRec();
+  }
+  saveCfg();
+  store.set("tiles",CFG.tiles||{});
+  store.set("presets",CFG.presets||[]);
+ }
+};
+function noteRun(g,won,secs){
+ let beat=false;
+ if(g.mode==="solo" && g.score>REC.marathon){ REC.marathon=g.score; beat=true; }
+ if(g.mode==="sprint" && won && (REC.sprint===0 || secs<REC.sprint)){ REC.sprint=secs; beat=true; }
+ if(g.mode==="speed" && g.lines>REC.speed[g.diff]){ REC.speed[g.diff]=g.lines; beat=true; }
+ if(g.mode==="versus" && won){ REC.wins++; beat=true; }
+ if(beat) saveRec();
+ return beat;
+}
+(function migrateHandling(){
+ const OLD={das:133,arr:18,sdf:25}, NEW={das:170,arr:60,sdf:8};
+ if(store.get("handlingRev",0)>=2) return;
+ for(const k in NEW) if(CFG[k]===OLD[k]) CFG[k]=NEW[k];
+ store.set("handlingRev",2);
+ saveCfg();
+})();
+(function migrateTouchOff(){
+ if(store.get("touchRev",0)>=2) return;
+ if(CFG.touch==="dpad" && !CFG.touchSet && !isCoarse()) CFG.touch="off";
+ if(CFG.touch==="dpad" && !CFG.touchSet && isCoarse()) CFG.touch="swipe";
+ store.set("touchRev",2);
+ saveCfg();
+})();
+const LANGS = ["en","ko"];
+const I18N = {
+ act_hardDrop:["Hard drop","하드 드롭"],
+ act_hold:["Hold","홀드"],
+ act_left:["Move left","왼쪽 이동"],
+ act_none:["—","—"],
+ act_pause:["Pause","일시정지"],
+ act_press:["press…","입력 대기…"],
+ act_right:["Move right","오른쪽 이동"],
+ act_rot180:["Rotate 180°","180° 회전"],
+ act_rotL:["Rotate left","왼쪽 회전"],
+ act_rotR:["Rotate right","오른쪽 회전"],
+ act_softDrop:["Soft drop","소프트 드롭"],
+ b_b2b:["BACK-TO-BACK ×{n}","백투백 ×{n}"],
+ b_combo:["COMBO ×{n}","콤보 ×{n}"],
+ b_mini:["T-SPIN MINI","T스핀 미니"],
+ b_pc:["PERFECT CLEAR","퍼펙트 클리어"],
+ b_quad:["TETRIS","테트리스"],
+ b_send:["SEND {n}","공격 {n}"],
+ b_sendto:["{n} TO {who}","{who}에게 {n}줄"],
+ b_tspin:["T-SPIN","T스핀"],
+ a11y_board:["Tetris board","테트리스 보드"],
+ back:["BACK","뒤로"],
+ btn_full:["Fullscreen","전체화면"],
+ btn_hold:["HOLD","홀드"],
+ btn_pause:["PAUSE","정지"],
+ c_audio:["AUDIO","소리"],
+ c_controls:["CONTROLS","컨트롤"],
+ c_general:["GENERAL","일반"],
+ c_keys:["KEYBOARD","키보드"],
+ c_net:["ONLINE","온라인"],
+ c_pad:["CONTROLLER","컨트롤러"],
+ c_settings:["Settings","설정"],
+ c_touch:["TOUCH","터치"],
+ c_video:["VIDEO","화면"],
+ cancel:["CANCEL","취소"],
+ chat_empty:["No messages yet.","아직 메시지가 없습니다."],
+ chat_send:["Send","보내기"],
+ chat_t:["Chat","채팅"],
+ copied:["Copied.","복사했습니다."],
+ copyfail:["Could not copy automatically — the code is selected, copy it by hand.","자동 복사에 실패했습니다 — 코드가 선택되어 있으니 직접 복사해 주세요."],
+ d_link:["link","연결"],
+ d_local:["local","로컬"],
+ d_public:["public","공인"],
+ e_badcode:["That code isn't valid. Copy the whole thing and try again.","올바른 코드가 아닙니다. 코드 전체를 복사해 다시 시도하세요."],
+ e_direct:["A direct link could not be established. Some networks stop two devices talking to each other, even on the same Wi-Fi. Try again from another network, such as a phone's hotspot.","직접 연결에 실패했습니다. 같은 와이파이라도 기기 간 통신을 막는 네트워크가 있습니다. 휴대폰 핫스팟 같은 다른 네트워크에서 다시 시도해 보세요."],
+ e_fbauth:["The signaling database refused the write to {p}. Check its security rules for that path.","시그널링 데이터베이스가 {p} 경로에 대한 쓰기를 거부했습니다. 해당 경로의 보안 규칙을 확인하세요."],
+ e_fbnet:["Could not reach the signaling database. Check the URL and your connection.","시그널링 데이터베이스에 연결하지 못했습니다. 주소와 네트워크를 확인하세요."],
+ e_first:["Create your code first.","먼저 코드를 만드세요."],
+ e_generic:["The connection failed. Try again, or try from another network.","연결에 실패했습니다. 다시 시도하거나 다른 네트워크에서 시도해 보세요."],
+ e_make:["Couldn't create a code: {m}","코드를 만들지 못했습니다: {m}"],
+ e_nofb:["No signaling database set. Add a Firebase database URL under Settings → Online, or play P2P and swap codes by hand.","시그널링 데이터베이스가 설정되지 않았습니다. 설정 → 온라인에서 Firebase 주소를 입력하거나 P2P로 코드를 직접 주고받으세요."],
+ e_noroom:["No room with that code. Check it and try again.","그 코드의 방이 없습니다. 다시 확인해 주세요."],
+ e_nostun:["The browser could not reach a STUN server, so it never learned this device's public address. A firewall or VPN may be blocking it.","STUN 서버에 연결하지 못해 이 기기의 공인 주소를 알 수 없었습니다. 방화벽이나 VPN이 막고 있을 수 있습니다."],
+ e_notguest:["That's not a guest code. It should come from their STEP 2.","참가자 코드가 아닙니다. 상대의 2단계 코드여야 합니다."],
+ e_nothost:["That's not a host code. Ask for the code from STEP 1.","방장 코드가 아닙니다. 상대의 1단계 코드를 받으세요."],
+ e_pastehost:["Paste the host's code first.","방장 코드를 먼저 붙여넣으세요."],
+ e_pastereply:["Paste your friend's reply code first.","친구의 답장 코드를 먼저 붙여넣으세요."],
+ e_peerleft:["Your opponent left.","상대가 나갔습니다."],
+ e_relay:["Lost the connection to the database.","데이터베이스 연결이 끊어졌습니다."],
+ e_roomfull:["Someone already joined that room.","이미 다른 사람이 참가한 방입니다."],
+ e_roomgone:["The room closed.","방이 닫혔습니다."],
+ e_streamdead:["Lost the room's live feed. Check the database's read rules.","방의 실시간 연결이 끊겼습니다. 데이터베이스 읽기 규칙을 확인하세요."],
+ e_timeout:["No connection after waiting.","기다렸지만 연결되지 않았습니다."],
+ e_waiting:["Still waiting for them to paste your reply — take your time.","상대가 답장 코드를 붙여넣기를 기다리는 중입니다. 천천히 하셔도 됩니다."],
+ f_firm:["a firm flick","세게 튕겨야"],
+ f_gentle:["a gentle flick","가볍게 튕겨도"],
+ f_normal:["a normal flick","보통 세기"],
+ g_clear:["CLEAR","클리어"],
+ g_done:["DONE","종료"],
+ g_go:["GO","시작"],
+ g_hold:["HOLD","홀드"],
+ g_ko:["K.O.","K.O."],
+ g_left:["LINES LEFT","남은 줄"],
+ g_level:["LEVEL","레벨"],
+ g_lines:["LINES","줄"],
+ g_next:["NEXT","다음"],
+ g_over:["GAME OVER","게임 오버"],
+ g_paused:["PAUSED","일시정지"],
+ g_score:["SCORE","점수"],
+ g_sent:["SENT","보냄"],
+ g_spectating:["SPECTATING","관전 중"],
+ g_time:["TIME","시간"],
+ g_timeleft:["TIME LEFT","남은 시간"],
+ go_best:["NEW BEST!","신기록!"],
+ go_menu:["BACK TO MENU","메뉴로 돌아가기"],
+ go_room:["BACK TO ROOM","방으로 돌아가기"],
+ host_connect:["CONNECT","연결"],
+ host_copy:["COPY CODE","코드 복사"],
+ host_hint:["Send the code however you like. Nothing goes through a server.","코드는 아무 방법으로나 보내도 됩니다. 서버를 거치지 않습니다."],
+ host_s1:["Step 1 — send this code to your friend","1단계 — 이 코드를 친구에게 보내기"],
+ host_s2:["Step 2 — paste the code they send back","2단계 — 친구가 보낸 답장 코드 붙여넣기"],
+ host_t:["HOST","방 만들기"],
+ join_copy:["COPY REPLY","답장 복사"],
+ join_hint:["After they paste your reply, the match starts on its own.","친구가 답장 코드를 붙여넣으면 경기가 바로 시작됩니다."],
+ join_make:["CREATE REPLY CODE","답장 코드 만들기"],
+ join_s1:["Step 1 — paste your friend's code","1단계 — 친구의 코드를 붙여넣기"],
+ join_s2:["Step 2 — send this back to them","2단계 — 이 코드를 친구에게 보내기"],
+ join_t:["JOIN","참가하기"],
+ lob_host:["HOST — SWAP CODES","코드로 방 만들기"],
+ lob_join:["JOIN — SWAP CODES","코드로 참가하기"],
+ lob_p2p:["P2P","P2P"],
+ lob_server:["SERVER","서버"],
+ lob_t:["VERSUS","대전"],
+ m_play:["PLAY","플레이"],
+ m_records:["RECORDS","기록"],
+ m_settings:["SETTINGS","설정"],
+ m_solo:["MARATHON","마라톤"],
+ m_speed:["SPEED","스피드"],
+ m_sprint:["SPRINT 40L","스프린트 40줄"],
+ m_versus:["VERSUS","대전"],
+ net_tag:["Peer to peer, no game server","게임 서버 없는 1:1 연결"],
+ ok_linking:["Linking up…","연결하는 중…"],
+ ok_sendback:["Now send this reply code back. The match starts as soon as they paste it.","이제 이 답장 코드를 보내세요. 상대가 붙여넣으면 바로 시작됩니다."],
+ on_none:["No open rooms. Make one and wait.","열린 방이 없습니다. 방을 만들고 기다려 보세요."],
+ on_seats:["{n}/{max} in the room","{max}명 중 {n}명"],
+ pause_quit:["QUIT TO MENU","메뉴로 나가기"],
+ pause_restart:["RESTART","다시 시작"],
+ pause_resume:["RESUME","계속하기"],
+ opponent:["OPPONENT","상대"],
+ pad_none:["none connected","연결된 패드 없음"],
+ ph_chat:["Write something…","메시지를 입력하세요…"],
+ ph_fb:["https://your-project-default-rtdb.firebaseio.com","https://your-project-default-rtdb.firebaseio.com"],
+ ph_gen:["generating…","생성 중…"],
+ ph_host:["paste the host code here","방장 코드를 붙여넣으세요"],
+ ph_name:["YOUR NAME","이름"],
+ ph_reply:["paste your friend's reply code","친구의 답장 코드를 붙여넣으세요"],
+ pv_centred:["centred","가운데"],
+ pv_default:["default","기본"],
+ pv_down:["lower","아래로"],
+ pv_in:["toward the screen","화면쪽"],
+ pv_out:["toward the edges","바깥쪽"],
+ pv_up:["raised","위로"],
+ rec_empty:["—","—"],
+ rec_marathon:["BEST MARATHON SCORE","마라톤 최고 점수"],
+ rec_speed:["BEST SPEED LINES · {d}","스피드 최고 줄 수 · {d}"],
+ rec_sprint:["BEST 40 LINE TIME","40줄 최고 기록"],
+ rec_t:["RECORDS","기록"],
+ rec_tag:["Kept on this device","이 기기에 저장됩니다"],
+ rec_wins:["VERSUS WINS","대전 승리"],
+ room_alone:["A match needs two. Invite someone to join.","대전은 2명부터 시작합니다. 친구를 초대하세요."],
+ room_battling:["IN BATTLE","대전 중"],
+ room_empty:["Nobody here yet.","아직 아무도 없습니다."],
+ room_hint:["The match starts as soon as you are both ready.","두 사람이 모두 준비하면 바로 시작합니다."],
+ room_hint_n:["{n} in the room. Everyone readies up, then it starts. Up to four.","방에 {n}명. 모두 준비하면 시작합니다. 최대 4명."],
+ room_leave:["LEAVE","나가기"],
+ room_match:["MATCH","대전 설정"],
+ room_players:["PLAYERS","플레이어"],
+ room_ready:["READY","준비 완료"],
+ room_spectate:["SPECTATE","관전하기"],
+ room_spectating:["SPECTATING","관전 중"],
+ room_unready:["CANCEL READY","준비 취소"],
+ room_unspectate:["STOP SPECTATING","관전 그만하기"],
+ room_wins:["WINS","승"],
+ room_you:["YOU","나"],
+ rule_attack:["ATTACK","공격전"],
+ rule_attack_s:["Clears send garbage across. The last well standing wins.","줄을 지우면 상대에게 방해 줄이 갑니다. 마지막까지 남은 사람이 승리합니다."],
+ rule_locked:["The host picks it.","방장이 정합니다."],
+ rule_score:["HIGH SCORE","점수전"],
+ rule_score_s:["Three minutes, nothing sent across. The highest score wins.","3분 동안 방해 줄 없이 겨루고, 점수가 가장 높은 사람이 승리합니다."],
+ set_arr:["ARR — auto-shift repeat","ARR — 자동 이동 간격"],
+ set_bind_hint:["Tap a row, then press the key you want. A key can only do one thing, so it is taken off anything else.","항목을 누른 뒤 원하는 키를 입력하세요. 한 키는 한 동작에만 배정되며 기존 배정은 해제됩니다."],
+ set_boardsize:["Board size","보드 크기"],
+ set_bob:["Board give","보드 반동"],
+ set_btnsize:["Button size","버튼 크기"],
+ set_btnx:["Spread","좌우 간격"],
+ set_btny:["Vertical position","세로 위치"],
+ set_ctlreset:["RESET CONTROLS","컨트롤 초기화"],
+ set_das:["DAS — delay before auto-shift","DAS — 자동 이동 시작 지연"],
+ set_dpad:["D-PAD","D패드"],
+ set_dpad_s:["On-screen d-pad and buttons below or beside the well.","화면에 D패드와 버튼이 표시됩니다."],
+ set_ghost:["Ghost piece","고스트 블록"],
+ set_grid:["Board grid","보드 격자"],
+ set_handling:["Handling","조작감"],
+ set_id:["Identity","이름"],
+ set_id_hint:["Shown to your opponent once you connect.","연결하면 상대에게 표시됩니다."],
+ set_lang:["Language","언어"],
+ set_off:["OFF","끄기"],
+ set_off_s:["No on-screen controls. Play with the keyboard or a gamepad.","화면 조작을 사용하지 않습니다. 키보드나 게임패드로 플레이하세요."],
+ set_padbind_hint:["Tap a row, then press the button. Defaults follow where TETRIS 99 puts each action on the pad.","항목을 누른 뒤 버튼을 누르세요. 기본값은 TETRIS 99의 버튼 배치를 따릅니다."],
+ set_paduse:["Use a controller","컨트롤러 사용"],
+ set_pres:["Presentation","화면"],
+ set_reset_keys:["RESET TO TETR.IO DEFAULTS","TETR.IO 기본값으로"],
+ set_reset_pad:["RESET TO TETRIS 99 LAYOUT","TETRIS 99 배치로"],
+ set_sdf:["SDF — soft drop speed","SDF — 소프트 드롭 속도"],
+ set_sig:["Signaling","시그널링"],
+ set_sig_hint:["Firebase Realtime Database URL. It carries the room list and the match itself, so you can play on networks that block a direct link. Swapping codes by hand never touches it.","Firebase 실시간 데이터베이스 주소. 방 목록과 경기 자체를 전달하므로 직접 연결이 막힌 네트워크에서도 플레이할 수 있습니다. 코드를 직접 주고받는 방식은 이 주소를 사용하지 않습니다."],
+ set_sound:["Sound","소리"],
+ set_sound_hint:["To be updated.","추후 업데이트 예정입니다."],
+ set_swap:["D-pad on the right","방향키를 오른쪽에"],
+ set_swap_s:["Swaps the D-pad and the A/B buttons.","방향키와 A/B 버튼의 위치를 바꿉니다."],
+ set_swdrop:["Drag to drop one row","한 줄 드롭 거리"],
+ set_swflick:["Flick speed for a hard drop","하드 드롭 튕김 속도"],
+ set_swipe:["SWIPE","스와이프"],
+ set_swipe_s:["No buttons: drag sideways to move, drag down to soft drop, flick down to hard drop, drag up to hold, tap to rotate.","버튼 없이 조작합니다. 좌우로 끌면 이동, 아래로 끌면 소프트 드롭, 아래로 튕기면 하드 드롭, 위로 끌면 홀드, 탭하면 회전."],
+ set_swmove:["Drag to move one cell","한 칸 이동 거리"],
+ set_swreset:["RESET SENSITIVITY","감도 초기화"],
+ e_tile_read:["That image could not be read.","이미지를 읽을 수 없습니다."],
+ e_tile_room:["No room left in storage — clear a tile and try again.","저장 공간이 부족합니다. 타일을 지우고 다시 시도하세요."],
+ e_tile_type:["That file is not an image.","이미지 파일이 아닙니다."],
+ set_tile_clearall:["clear all","모두 지우기"],
+ set_tile_reset:["reset","초기화"],
+ set_tile_upload:["upload","업로드"],
+ set_data:["Your data","내 데이터"],
+ set_export:["EXPORT","내보내기"],
+ set_import:["IMPORT","가져오기"],
+ set_data_hint:["Saves settings, records, tiles and presets to a file. It includes your database URL, so treat the file as private.","설정, 기록, 타일, 프리셋을 파일로 저장합니다. 데이터베이스 주소가 포함되므로 파일을 공유하지 마세요."],
+ set_presets:["Skin presets","스킨 프리셋"],
+ set_presets_hint:["Save the current seven tiles together, and load them back in one go. Up to five.","현재 7개 타일을 한 세트로 저장하고 한 번에 불러옵니다. 최대 5개."],
+ set_preset_save:["SAVE","저장"],
+ set_preset_load:["LOAD","불러오기"],
+ set_preset_del:["DELETE","삭제"],
+ preset_none:["No presets saved yet.","저장된 프리셋이 없습니다."],
+ preset_n:["Preset {n}","프리셋 {n}"],
+ ph_preset:["preset name","프리셋 이름"],
+ ok_export:["Exported.","내보냈습니다."],
+ ok_import:["Imported.","가져왔습니다."],
+ e_badfile:["That is not a valid settings file.","올바른 설정 파일이 아닙니다."],
+ e_newfile:["That file was saved by a newer version of the game.","더 새로운 버전에서 저장한 파일입니다."],
+ e_preset_full:["Five presets is the limit. Delete one first.","프리셋은 최대 5개입니다. 하나를 먼저 삭제하세요."],
+ e_preset_empty:["Upload at least one tile before saving a preset.","프리셋을 저장하려면 타일을 하나 이상 올리세요."],
+ e_preset_space:["No room left in storage for another preset.","저장 공간이 부족해 프리셋을 저장할 수 없습니다."],
+ set_tiles:["Tetromino tiles","테트로미노 타일"],
+ set_tiles_hint:["Upload a square image per piece to use in place of its colour.","조각마다 정사각형 이미지를 올리면 색 대신 타일로 사용됩니다."],
+ sp_easy:["EASY","쉬움"],
+ sp_hard:["HARD","어려움"],
+ sp_hint:["The bar under the well is the time you have left. Clearing any line fills it again; letting it empty ends the run. Gravity still climbs a level every ten lines.","보드 아래 막대가 남은 시간입니다. 줄을 지우면 다시 채워지고, 모두 비면 게임이 끝납니다. 10줄마다 레벨이 올라가는 것은 그대로입니다."],
+ sp_normal:["NORMAL","보통"],
+ srv_list:["ROOM LIST","방 목록"],
+ srv_make:["CREATE ROOM","방 만들기"],
+ st_answering:["REPLY READY","답장 준비됨"],
+ st_connected:["CONNECTED","연결됨"],
+ st_failed:["FAILED","실패"],
+ st_idle:["IDLE","대기"],
+ st_linking:["CONNECTING…","연결 중…"],
+ st_offering:["CODE READY","코드 준비됨"],
+ st_preparing:["PREPARING…","준비 중…"],
+ st_relayed:["RELAYED","중계 연결"],
+ st_waiting:["WAITING FOR A CODE","코드 기다리는 중"],
+ status:["STATUS","상태"],
+ u_swipepx:["{v}% · about {px}px","{v}% · 약 {px}px"],
+ u_cps:["{v} cells/sec","초당 {v}칸"],
+ u_flick:["{v} — {n}","{v} — {n}"],
+ u_instant:["instant (0 ms)","즉시 (0 ms)"],
+ u_ms:["{v} ms","{v} ms"],
+ working:["working…","처리 중…"]
+};
+function T(key,vars){
+ const row=I18N[key];
+ if(!row) return key;
+ let s=row[LANGS.indexOf(CFG.lang)]||row[0];
+ if(vars) for(const k in vars) s=s.split("{"+k+"}").join(vars[k]);
+ return s;
+}
+function EN(key,vars){
+ const row=I18N[key];
+ if(!row) return key;
+ let s=row[0];
+ if(vars) for(const k in vars) s=s.split("{"+k+"}").join(vars[k]);
+ return s;
+}
+function applyLang(){
+ if(!LANGS.includes(CFG.lang)) CFG.lang="en";
+ document.documentElement.lang = CFG.lang;
+ $$("[data-i18n]").forEach(el=>{
+  el.textContent=T(el.dataset.i18n);
+  delete el.dataset.orig;
+ });
+ $$("[data-i18n-ph]").forEach(el=>{ el.placeholder=T(el.dataset.i18nPh); });
+ $$("[data-i18n-aria]").forEach(el=>{ el.setAttribute("aria-label",T(el.dataset.i18nAria)); });
+ $$(".lang").forEach(b=>b.classList.toggle("on",b.dataset.lang===CFG.lang));
+ if(typeof UI!=="undefined"){
+  UI.renderRecords(); UI.renderRoom();
+  if(UI.cur==="#v-set") UI.openTab(TAB);
+ }
+ if(typeof repaintSettings==="function") repaintSettings();
+ if(typeof tileNote==="function") tileNote();   // re-render in the new language
+}
+const SHAPES = {
+ I:["....","IIII","....","...."],
+ J:["J..","JJJ","..."],  L:["..L","LLL","..."],  O:["OO","OO"],
+ S:[".SS","SS.","..."],  T:[".T.","TTT","..."],  Z:["ZZ.",".ZZ","..."]
+};
+const TYPES = ["I","J","L","O","S","T","Z"];
+const kicks = fwd => {
+ const t={};
+ for(const k in fwd){
+  t[k]=fwd[k];
+  t[k[2]+">"+k[0]]=fwd[k].map(([x,y])=>[-x,-y]);
+ }
+ return t;
+};
+const KICK_JLSTZ = kicks({
+ "0>1":[[0,0],[-1,0],[-1,-1],[0,2],[-1,2]],
+ "1>2":[[0,0],[1,0],[1,1],[0,-2],[1,-2]],
+ "2>3":[[0,0],[1,0],[1,-1],[0,2],[1,2]],
+ "3>0":[[0,0],[-1,0],[-1,1],[0,-2],[-1,-2]]
+});
+const KICK_I = kicks({
+ "0>1":[[0,0],[-2,0],[1,0],[-2,1],[1,-2]],
+ "1>2":[[0,0],[-1,0],[2,0],[-1,-2],[2,1]],
+ "2>3":[[0,0],[2,0],[-1,0],[2,-1],[-1,2]],
+ "3>0":[[0,0],[1,0],[-2,0],[1,2],[-2,-1]]
+});
+const CELLS = {};
+for(const t of TYPES){
+ let rows=SHAPES[t];
+ CELLS[t]=[0,1,2,3].map(()=>{
+  const out=[];
+  rows.forEach((row,y)=>[...row].forEach((ch,x)=>{ if(ch!==".") out.push([x,y]); }));
+  rows=rows.map((_,y)=>rows.map(r=>r[y]).reverse().join(""));
+  return out;
+ });
+}
+function traceOutline(cells){
+ const at=new Set(cells.map(([x,y])=>x+","+y));
+ const has=(x,y)=>at.has(x+","+y);
+ const step=new Map();
+ for(const [x,y] of cells){
+  if(!has(x,y-1)) step.set(x+","+y,         [x+1,y]);
+  if(!has(x+1,y)) step.set((x+1)+","+y,     [x+1,y+1]);
+  if(!has(x,y+1)) step.set((x+1)+","+(y+1), [x,y+1]);
+  if(!has(x-1,y)) step.set(x+","+(y+1),     [x,y]);
+ }
+ const s=cells.reduce((a,b)=> b[1]<a[1]||(b[1]===a[1]&&b[0]<a[0]) ? b : a);
+ const loop=[]; let p=s;
+ do{ loop.push(p); p=step.get(p[0]+","+p[1]); }while(p && (p[0]!==s[0]||p[1]!==s[1]));
+ return loop.filter((p,i)=>{
+  const a=loop[(i+loop.length-1)%loop.length], b=loop[(i+1)%loop.length];
+  return !((a[0]===p[0]&&p[0]===b[0]) || (a[1]===p[1]&&p[1]===b[1]));
+ });
+}
+const OUTLINE = {};
+for(const t of TYPES) OUTLINE[t]=CELLS[t].map(traceOutline);
+const PIECE_COLOR = {
+ I:"#4fd0e0", O:"#e0c94f", T:"#a86fe0", S:"#4fe07a",
+ Z:"#e0625f", J:"#5f8fe0", L:"#e0954f", G:"#5a5a5a"
+};
+const PIECE_TILE = {};
+function loadTile(type,url){
+ if(!url){ delete PIECE_TILE[type]; return; }
+ const img=new Image();
+ img.src=url;
+ PIECE_TILE[type]=img;
+}
+for(const t in CFG.tiles) loadTile(t,CFG.tiles[t]);
+const COLS=10, VIS_ROWS=20, BUFFER=2, ROWS=VIS_ROWS+BUFFER;
+// guideline curve, capped at level 20
+function gravityFor(level){
+ const l = Math.min(level,20);
+ return Math.pow(0.8 - (l-1)*0.007, l-1) * 1000;
+}
+const COMBO_TABLE=[0,0,1,1,1,2,2,3,3,4,4,4,4,5];
+const SPEED_LIMITS={easy:15000, normal:10000, hard:5000};
+const MATCH_MS=180000;
+let NET_RULE="attack";
+function mulberry32(a){
+ return function(){
+  a|=0; a=a+0x6D2B79F5|0;
+  let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;
+  return ((t^t>>>14)>>>0)/4294967296;
+ };
+}
+let NET_SEED = 0;
+// P2P has no host to deal a new seed, so both ends step the shared one identically
+function advanceSeed(s){ return (Math.floor(mulberry32(s)()*4294967296)>>>0)||1; }
+// seeded in versus so every client deals the same pieces
+class Bag {
+ constructor(seed){ this.q=[]; this.rand = seed ? mulberry32(seed) : Math.random; }
+ fill(){
+  const b=TYPES.slice();
+  for(let i=b.length-1;i>0;i--){
+   const j=Math.floor(this.rand()*(i+1));
+   [b[i],b[j]]=[b[j],b[i]];
+  }
+  this.q.push(...b);
+ }
+ next(){ while(this.q.length<8) this.fill(); return this.q.shift(); }
+ peek(n){ while(this.q.length<n+2) this.fill(); return this.q.slice(0,n); }
+}
+class Game {
+ constructor(mode="solo"){
+  this.mode = mode;
+  this.diff = CFG.speedDiff;
+  this.rule = mode==="versus" ? NET_RULE : "attack";
+  this.clock = this.rule==="score" ? MATCH_MS : 0;
+  this.left  = this.clock;
+  this.attacks = this.rule!=="score";
+  this.limit = mode==="speed" ? SPEED_LIMITS[this.diff]||SPEED_LIMITS.normal : 0;
+  this.fuse  = this.limit;
+  this.timeout = false;
+  this.away = false;
+  this.doneAt=0; this.settled=false;
+  this.board = Array.from({length:ROWS},()=>new Array(COLS).fill(null));
+  this.bag = new Bag(mode==="versus" ? NET_SEED : 0);
+  this.hold = null; this.holdUsed = false;
+  this.score=0; this.lines=0; this.level=1;
+  this.combo=-1; this.b2b=-1;
+  this.attackSent=0; this.attackRecv=0;
+  this.pendingGarbage=[];
+  this.garbageHole=rnd(COLS);
+  this.over=false; this.won=false; this.paused=false; this.spectating=false;
+  this.stranded=false;
+  this.resolved=false; this.pending=false; this.pendingAt=0;
+  this.startedAt=now(); this.endedAt=0;
+  this.pieceCount=0;
+  this.dropTimer=0; this.lockTimer=0; this.lockResets=0; this.grounded=false;
+  this.clearing=null;
+  this.lastAction="";
+  this.lastKick=0;
+  this.events=[];
+  this.stats={quad:0,tspin:0,pc:0,maxCombo:0};
+  this.spawn();
+ }
+ // enters on the first visible row and slides up into the buffer when blocked
+ spawn(type){
+  this.cur = {
+   t: type || this.bag.next(),
+   r: 0,
+   x: 0, y: 0
+  };
+  this.cur.x = this.cur.t==="O" ? 4 : 3;
+  let y=BUFFER;
+  while(y>0 && this.collides(this.cur.x,y,this.cur.r)) y--;
+  this.cur.y = y;
+  this.holdUsed = false;
+  this.dropTimer = 0; this.lockTimer=0; this.lockResets=0; this.grounded=false;
+  this.lastAction=""; this.lastKick=0;
+  this.pieceCount++;
+  if(this.collides(this.cur.x,this.cur.y,this.cur.r)){
+   this.die();
+  }
+ }
+ cells(x,y,r,t){ return CELLS[t||this.cur.t][r].map(([cx,cy])=>[x+cx,y+cy]); }
+ collides(x,y,r,t){
+  for(const [cx,cy] of this.cells(x,y,r,t)){
+   if(cx<0||cx>=COLS||cy>=ROWS) return true;
+   if(cy>=0 && this.board[cy][cx]) return true;
+  }
+  return false;
+ }
+ move(dx,dy){
+  if(this.over||this.clearing) return false;
+  if(this.collides(this.cur.x+dx,this.cur.y+dy,this.cur.r)) return false;
+  this.cur.x+=dx; this.cur.y+=dy;
+  this.lastAction = "move";
+  this.touchLockReset();
+  return true;
+ }
+ rotate(dir){
+  if(this.over||this.clearing) return false;
+  const from=this.cur.r, to=(from+dir+4)%4;
+  if(this.cur.t==="O"){ this.cur.r=to; return true; }
+  const table = this.cur.t==="I" ? KICK_I : KICK_JLSTZ;
+  const kicks = table[from+">"+to];
+  for(let i=0;i<kicks.length;i++){
+   const [dx,dy]=kicks[i];
+   if(!this.collides(this.cur.x+dx,this.cur.y+dy,to)){
+    this.cur.x+=dx; this.cur.y+=dy; this.cur.r=to;
+    this.lastAction="rot"; this.lastKick=i;
+    this.touchLockReset();
+    return true;
+   }
+  }
+  return false;
+ }
+ // both quarter turns land or the piece does not move: a half-turn is not the move asked for
+ rotate180(){
+  if(this.over||this.clearing) return false;
+  const was={x:this.cur.x,y:this.cur.y,r:this.cur.r,act:this.lastAction,kick:this.lastKick};
+  if(this.rotate(1) && this.rotate(1)) return true;
+  this.cur.x=was.x; this.cur.y=was.y; this.cur.r=was.r;
+  this.lastAction=was.act; this.lastKick=was.kick;
+  return false;
+ }
+ touchLockReset(){
+  if(this.grounded && this.lockResets<15){ this.lockTimer=0; this.lockResets++; }
+ }
+ holdPiece(){
+  if(this.over||this.holdUsed||this.clearing) return false;
+  const swap=this.hold;
+  this.hold=this.cur.t;
+  this.spawn(swap||undefined);
+  this.holdUsed=true;      // set after spawn(), which clears it for the new piece
+  return true;
+ }
+ ghostY(){
+  let y=this.cur.y;
+  while(!this.collides(this.cur.x,y+1,this.cur.r)) y++;
+  return y;
+ }
+ softDrop(){
+  if(this.move(0,1)){ this.score+=1; this.dropTimer=0; return true; }
+  return false;
+ }
+ hardDrop(){
+  if(this.over||this.clearing) return;
+  const gy=this.ghostY(), dist=gy-this.cur.y;
+  this.cur.y=gy; this.score+=dist*2;
+  if(dist>0) this.lastAction="move";
+  this.lock(true);
+ }
+ detectSpin(){
+  if(this.cur.t!=="T"||this.lastAction!=="rot") return null;
+  const bx=this.cur.x, by=this.cur.y;
+  const occ=(x,y)=> x<0||x>=COLS||y>=ROWS ? true : (y<0 ? false : !!this.board[y][x]);
+  const corners=[[bx,by],[bx+2,by],[bx,by+2],[bx+2,by+2]];
+  const filled=corners.map(([x,y])=>occ(x,y));
+  const total=filled.filter(Boolean).length;
+  if(total<3) return null;
+  const FRONT={0:[0,1],1:[1,3],2:[2,3],3:[0,2]}[this.cur.r];
+  const frontCount = FRONT.filter(i=>filled[i]).length;
+  if(frontCount===2 || this.lastKick===4) return "tspin";
+  return "mini";
+ }
+ lock(hard){
+  const spin=this.detectSpin();
+  const cells=this.cells(this.cur.x,this.cur.y,this.cur.r);
+  if(cells.every(([,cy])=>cy<BUFFER)){ this.die(); return; }
+  for(const [cx,cy] of cells){
+   if(cy<0){ this.die(); return; }
+   this.board[cy][cx]=this.cur.t;
+  }
+  if(hard) this.events.push({e:"drop"});
+  const rows=[];
+  for(let y=0;y<ROWS;y++) if(this.board[y].every(c=>c)) rows.push(y);
+  this.resolveClear(rows,spin);
+ }
+ resolveClear(rows,spin){
+  const n=rows.length;
+  if(n===0){
+   this.combo=-1;
+   if(spin){ this.events.push({e:"text",text:EN(spin==="mini"?"b_mini":"b_tspin"),kind:"spin"}); ; }
+   this.events.push({e:"locked"});
+   this.applyGarbage();
+   this.spawn();
+   return;
+  }
+  this.fuse=this.limit;
+  this.combo++;
+  this.stats.maxCombo=Math.max(this.stats.maxCombo,this.combo);
+  const difficult = n===4 || (spin==="tspin"&&n>0) || (spin==="mini"&&n>0);
+  if(difficult) this.b2b++; else this.b2b=-1;
+  let base;
+  if(spin==="tspin")      base=[0,800,1200,1600][n]||1600;
+  else if(spin==="mini")  base=[0,200,400][n]||400;
+  else                    base=[0,100,300,500,800][n];
+  let pts = base*this.level;
+  if(this.b2b>0) pts=Math.floor(pts*1.5);
+  pts += (this.combo>0 ? 50*this.combo*this.level : 0);
+  this.score += pts;
+  let atk;
+  if(spin==="tspin")      atk=[0,2,4,6][n]||6;
+  else if(spin==="mini")  atk=[0,0,1][n]||1;
+  else                    atk=[0,0,1,2,4][n];
+  if(this.b2b>0) atk+=1;
+  atk += COMBO_TABLE[Math.min(this.combo,COMBO_TABLE.length-1)];
+  const willBeEmpty = this.board.every((row,y)=> rows.includes(y) || row.every(c=>!c));
+  if(willBeEmpty){ atk+=10; this.score+=3500*this.level; this.stats.pc++; }
+  let label = spin ? EN(spin==="mini"?"b_mini":"b_tspin") : (n===4 ? EN("b_quad") : "");
+  if(willBeEmpty) label=EN("b_pc");
+  if(label) this.events.push({e:"text",text:label,kind: willBeEmpty?"pc" : (n===4||spin) ? "big":"norm"});
+  if(this.events.length>64) this.events.splice(0,this.events.length-64);   // a drain that stalls must not grow this forever
+  if(this.b2b>0) this.events.push({e:"text",text:EN("b_b2b",{n:this.b2b}),kind:"b2b"});
+  if(this.combo>0) this.events.push({e:"text",text:EN("b_combo",{n:this.combo}),kind:"combo"});
+  if(n===4) this.stats.quad++;
+  if(spin) this.stats.tspin++;
+  let out=atk;
+  while(out>0 && this.pendingGarbage.length){
+   const g=this.pendingGarbage[0];
+   const take=Math.min(out,g.lines);
+   g.lines-=take; out-=take;
+   if(g.lines<=0) this.pendingGarbage.shift();
+  }
+  if(out>0 && this.attacks){ this.attackSent+=out; this.events.push({e:"attack",lines:out}); }
+  this.lines += n;
+  this.level = this.mode==="sprint" ? 1 : Math.floor(this.lines/10)+1;
+  const preDrop = this.board.map(row=>[...row]);
+  for(const y of rows) preDrop[y] = new Array(COLS).fill(null);
+  for(const y of [...rows].sort((a,b)=>a-b)){
+   this.board.splice(y,1);
+   this.board.unshift(new Array(COLS).fill(null));
+  }
+  this.clearing = {board:preDrop, t:0};
+  this.events.push({e:"clear",n,spin,perfect:willBeEmpty});
+  if(this.mode==="sprint" && this.lines>=40){ this.win(); return; }
+  this.applyGarbage();
+  this.spawn();
+ }
+ queueGarbage(lines){
+  lines=Math.min(lines|0,COLS*2);   // a peer message is not trusted to be sane
+  if(lines<=0||this.over||!this.attacks) return;
+  this.attackRecv+=lines;
+  this.pendingGarbage.push({lines, at:now()});
+ }
+ pendingCount(){ return this.pendingGarbage.reduce((s,g)=>s+g.lines,0); }
+ // eight rows at most per piece; the rest stays queued rather than being dropped
+ applyGarbage(){
+  const total=Math.min(this.pendingCount(),8);
+  if(total<=0) return;
+  let owed=total;
+  while(owed>0 && this.pendingGarbage.length){
+   const g=this.pendingGarbage[0];
+   const take=Math.min(owed,g.lines);
+   g.lines-=take; owed-=take;
+   if(g.lines<=0) this.pendingGarbage.shift();
+  }
+  for(let i=0;i<total;i++){
+   if(Math.random()<0.3) this.garbageHole=rnd(COLS);
+   const row=new Array(COLS).fill("G");
+   row[this.garbageHole]=null;
+   if(this.board[0].some(c=>c)){ this.die(); return; }
+   this.board.shift();
+   this.board.push(row);
+  }
+  this.events.push({e:"garbage",lines:total});
+ }
+ die(){ if(this.over) return; this.over=true; this.clearing=null; this.endedAt=now(); this.events.push({e:"dead"}); ; }
+ win(){ if(this.over) return; this.over=true; this.won=true; this.clearing=null; this.endedAt=now(); this.events.push({e:"win"}); ; }
+ // a duration measured on one machine, so it compares without sharing a clock
+ lasted(){ return Math.max(0, Math.round((this.endedAt||now())-this.startedAt)); }
+ outlasted(){ if(this.won) return; this.won=true; ; }
+ tick(dt, input){
+  if(this.over||this.paused) return;
+  if(this.clock){
+   this.left -= dt;
+   if(this.left<=0){ this.left=0; this.timeout=true; this.die(); return; }
+  }
+  if(this.clearing){
+   this.clearing.t += dt;
+   if(this.clearing.t>=CLEAR_MS) this.clearing=null;
+   return;
+  }
+  if(this.limit){
+   this.fuse -= dt;
+   if(this.fuse<=0){ this.fuse=0; this.timeout=true; this.die(); return; }
+  }
+  const g = input.soft ? Math.min(gravityFor(this.level), 1000/CFG.sdf) : gravityFor(this.level);
+  this.dropTimer += dt;
+  while(this.dropTimer>=g){
+   this.dropTimer-=g;
+   if(!this.collides(this.cur.x,this.cur.y+1,this.cur.r)){
+    this.cur.y++;
+    if(input.soft) this.score+=1;
+    this.lastAction="move";
+   } else break;
+  }
+  const landed = this.collides(this.cur.x,this.cur.y+1,this.cur.r);
+  if(landed){
+   if(!this.grounded){ this.grounded=true; this.lockTimer=0; }
+   this.lockTimer += dt;
+   if(this.lockTimer>=LOCK_MS || this.lockResets>=15 && this.lockTimer>=LOCK_MS*0.5) this.lock();
+  }else{
+   this.grounded=false; this.lockTimer=0;
+  }
+ }
+ // flat cell string; lowercase marks the piece still in play
+ snapshot(){
+  let s="";
+  for(let y=BUFFER;y<ROWS;y++)
+   for(let x=0;x<COLS;x++)
+    s += this.board[y][x] ? this.board[y][x] : ".";
+  if(!this.over && this.cur){
+   const arr=[...s];
+   for(const [cx,cy] of this.cells(this.cur.x,this.cur.y,this.cur.r)){
+    const ry=cy-BUFFER;
+    if(ry>=0&&ry<VIS_ROWS&&cx>=0&&cx<COLS) arr[ry*COLS+cx]=this.cur.t.toLowerCase();
+   }
+   s=arr.join("");
+  }
+  return s;
+ }
+}
+const LOCK_MS=500, CLEAR_MS=200;
+const cv=$("#cv"), ctx=cv.getContext("2d");
+let DPR=1, CW=0, CH=0;
+let L=null;
+const FOE_BAND=[0,0.20,0.22,0.24];
+const WELL_MAX_H=0.80;
+// both arrangements are solved and the one leaving your own well larger wins
+function solveWell(W,H,foes,below){
+ const gut=Math.max(4,Math.min(W,H)*0.018);
+ const topM=Math.max(6,H*0.030), botM=Math.max(6,H*0.030);
+ let availH=Math.max(40,H-topM-botM);
+ const beside=foes>0&&!below;
+ let band=0;
+ if(foes&&below){ band=availH*FOE_BAND[foes]; availH=Math.max(40,availH-band-gut*1.4); }
+ const k=beside?(foes===1?1:1/foes):0;
+ const span=15.7+(beside?10*k+1.1:0);
+ const parts=c=>{
+  const bw=c*10, gw=foes?Math.max(3,c*0.26):0;
+  const colW=clamp((W-bw-gw-c*10*k-gut*(beside?3.2:0.8))/2, c*2.7, c*4.4);
+  const strip=beside?gut*1.6+bw*k:0;
+  return {bw,gw,colW,strip,groupW:colW+gw+bw+colW+strip};
+ };
+ let cell=Math.max(4,Math.min(availH/20.1,H*WELL_MAX_H/20,(W-gut*2)/span));
+ let g=parts(cell);
+ const usable=W-gut*(beside?1.8:0.8);
+ if(g.groupW>usable){ cell=Math.max(4,cell*usable/g.groupW); g=parts(cell); }
+ const {bw,gw,colW,groupW}=g, bh=cell*20;
+ const x0=(W-groupW)/2;
+ const x=x0+colW+gw;
+ const y=topM+(availH-bh)/2;
+ const opps=[];
+ if(beside&&foes===1){
+  const oc=cell, ow=oc*10;
+  opps.push({x:x+bw+colW+gut*1.6,y,w:ow,h:oc*20,cell:oc});
+ }else if(beside){
+  // the gap has to hold each board's name label, or it lands on the board
+  // below; label size follows board width follows gutter, so two passes
+  const ox=x+bw+colW+gut*1.6;
+  const labelFor=c=>Math.min(Math.max(9,cell*0.42), c*10*0.115)*1.35;
+  let oc=(bh-(foes-1)*gut*0.8)/foes/20;
+  for(let i=0;i<2;i++) oc=(bh-(foes-1)*Math.max(gut*0.8,labelFor(oc)))/foes/20;
+  const stackGut=Math.max(gut*0.8,labelFor(oc)), ow=oc*10;
+  let oy=y;
+  for(let i=0;i<foes;i++){ opps.push({x:ox,y:oy,w:ow,h:oc*20,cell:oc}); oy+=oc*20+stackGut; }
+ }else if(foes){
+  const lane=(W-gut*2-(foes-1)*gut*0.9)/foes;
+  const oc=Math.max(2,Math.min(band/20,lane/10));
+  const ow=oc*10, tot=foes*ow+(foes-1)*gut*0.9;
+  let ox=(W-tot)/2, oy=topM+availH+gut*1.4+(band-oc*20)/2;
+  for(let i=0;i<foes;i++){ opps.push({x:ox,y:oy,w:ow,h:oc*20,cell:oc}); ox+=ow+gut*0.9; }
+ }
+ return {x, y, w:bw, h:bh, cell, gut, headerH:topM, colW, gw, x0, opps};
+}
+function wellBox(W,H,foes){
+ foes=Math.max(0,Math.min(3,foes|0));
+ // opponents always sit beside your board, side by side, never stacked underneath
+ return solveWell(W,H,foes,false);
+}
+let TWIN=0;
+function computeLayout(){
+ const b=wellBox(CW,CH,TWIN);
+ const {cell,gut,headerH,colW,gw,x0}=b;
+ const tile=colW/4.4;
+ const holdH=cell*1.15+tile*2.6;
+ const nextH=b.h*0.6;
+ const step=(nextH-cell*1.2)/5;
+ const ntile=Math.min(tile,step/3.0);
+ const below=Math.max(0,CH-(b.y+b.h));
+ const fuseH=Math.max(3,Math.min(cell*0.26,below*0.40));
+ const fuseGap=Math.max(2,Math.min(cell*0.34,(below-fuseH)*0.42));
+ L={
+  cell,gut,headerH,tile,ntile,step,
+  bx:b.x,by:b.y,bw:b.w,bh:b.h,
+  gx:x0+colW,gy:b.y,gw,gh:b.h,
+  hold:{x:x0,y:b.y,w:colW,h:holdH},
+  hud :{x:x0,y:b.y+b.h-cell*7.6,w:colW,h:cell*7.6,r:x0+colW},
+  next:{x:b.x+b.w,y:b.y,w:colW,h:nextH},
+  fuse:{x:b.x,y:b.y+b.h+fuseGap,w:b.w,h:fuseH},
+  opps:b.opps
+ };
+}
+function resizeCanvas(){
+ const r=cv.getBoundingClientRect();
+ CW=Math.max(1,r.width); CH=Math.max(1,r.height);
+ DPR=Math.min(window.devicePixelRatio||1,2.5);
+ const MAXPX=9e6;
+ if(CW*CH*DPR*DPR>MAXPX) DPR=Math.max(1,Math.sqrt(MAXPX/(CW*CH)));
+ const w=Math.round(CW*DPR), h=Math.round(CH*DPR);
+ if(cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; }
+ computeLayout();
+}
+new ResizeObserver(resizeCanvas).observe(cv);
+const TS=m=>Math.max(9,L.cell*m);
+const INK = {
+ bg:"#0a0a0c", well:"#050507", grid:"rgba(255,255,255,.20)",
+ line:"rgba(255,255,255,.20)", frame:"#ffffff",
+ fg:"#ededf0", dim:"#c4c4cc", faint:"#9a9aa5",
+ danger:"#ff5a5f"
+};
+const WELL_A = 0.7;
+function rgba(hex,a){
+ const n=parseInt(hex.slice(1),16);
+ return "rgba("+(n>>16&255)+","+(n>>8&255)+","+(n&255)+","+a+")";
+}
+function label(txt,x,y,maxW){
+ const sz=maxW?Math.min(TS(0.5),maxW*0.21):TS(0.5);
+ textFit(txt,x,y,sz,INK.faint,"left",600,sz*0.13,maxW||1e5);
+}
+// edges snap to whole device pixels: a shared boundary must resolve to one pixel for both cells, or a seam opens
+function block(x,y,s,type,alpha=1){
+ ctx.globalAlpha=alpha;
+ const q=v=>Math.round(v*DPR)/DPR;
+ const x0=q(x), y0=q(y), w=q(x+s)-x0, h=q(y+s)-y0;
+ const img=PIECE_TILE[type];
+ if(img && img.complete && img.naturalWidth){
+  ctx.drawImage(img,x0,y0,w,h);
+ }else{
+  ctx.fillStyle=PIECE_COLOR[type]||PIECE_COLOR.G;
+  ctx.fillRect(x0,y0,w,h);
+ }
+ ctx.globalAlpha=1;
+}
+const GHOST_INK = "#ffffff";
+function pieceOutline(type,r,px,py,bx,by,cell,alpha,width){
+ const ox=bx+px*cell, oy=by+(py-BUFFER)*cell;
+ ctx.save();
+ ctx.beginPath();
+ OUTLINE[type][r].forEach(([x,y],i)=>{
+  const X=ox+x*cell, Y=oy+y*cell;
+  i ? ctx.lineTo(X,Y) : ctx.moveTo(X,Y);
+ });
+ ctx.closePath();
+ ctx.clip();
+ ctx.globalAlpha=alpha;
+ ctx.strokeStyle=GHOST_INK;
+ ctx.lineWidth=width;
+ ctx.lineJoin="round";
+ ctx.stroke();
+ ctx.restore();
+}
+const GHOST_A = 0.40;
+function ghostPiece(type,r,px,py,bx,by,cell){
+ pieceOutline(type,r,px,py,bx,by,cell,GHOST_A,Math.max(1,cell*0.075)*2);
+}
+function text(str,x,y,size,color,align="left",weight=600,spacing=0){
+ ctx.fillStyle=color; ctx.textAlign=align; ctx.textBaseline="alphabetic";
+ ctx.font=weight+" "+size+"px "+CANVAS_FONT;
+ if(spacing) ctx.letterSpacing=spacing+"px";
+ ctx.fillText(str,x,y);
+ if(spacing) ctx.letterSpacing="0px";
+}
+function textFit(str,x,y,size,color,align,weight,spacing,maxW){
+ let s=size, sp=spacing||0, txt=String(str);
+ const wOf=()=>{
+  ctx.font=weight+" "+s+"px "+CANVAS_FONT;
+  ctx.letterSpacing=sp+"px";
+  const w=ctx.measureText(txt).width;
+  ctx.letterSpacing="0px";
+  return w;
+ };
+ let w=wOf();
+ for(let i=0;i<40 && w>maxW;i++){
+  if(sp>0){ sp=0; }
+  else if(s>6.5){ s-=Math.max(0.4,s*0.07); }
+  else if(txt.length>2){ txt=txt.slice(0,-2)+"…"; }
+  else break;
+  w=wOf();
+ }
+ text(txt,x,y,s,color,align,weight,sp);
+ return w;
+}
+function preview(type,cx,cy,s){
+ const cells=CELLS[type][0];
+ const xs=cells.map(c=>c[0]), ys=cells.map(c=>c[1]);
+ const w=(Math.max(...xs)-Math.min(...xs)+1), h=(Math.max(...ys)-Math.min(...ys)+1);
+ const ox=cx-w*s/2-Math.min(...xs)*s, oy=cy-h*s/2-Math.min(...ys)*s;
+ for(const [x,y] of cells) block(ox+x*s,oy+y*s,s,type);
+}
+const BOB_STIFF=0.28,    BOB_DAMP=0.58;
+const BOB_UP_STIFF=0.04, BOB_UP_DAMP=0.76;
+const CLEAR_TXT_IN=100, CLEAR_TXT_HOLD=2000, CLEAR_TXT_OUT=100;
+const CLEAR_TXT_MS=CLEAR_TXT_IN+CLEAR_TXT_HOLD+CLEAR_TXT_OUT;
+const FX = {
+ banners:[], clearBanners:[], clearGen:0, clearBannerGen:-1, bob:0, bobV:0,
+ banner(txt,kind){
+  FX.banners.push({txt,life:1,y:0,big:kind==="big"||kind==="pc"});
+  if(FX.banners.length>3) FX.banners.shift();
+ },
+ clearText(txt,big){
+  if(FX.clearBannerGen!==FX.clearGen){ FX.clearBanners.length=0; FX.clearBannerGen=FX.clearGen; }
+  FX.clearBanners.push({txt,big,t:0});
+  if(FX.clearBanners.length>3) FX.clearBanners.shift();
+ },
+ bump(n){
+  if(!CFG.bob) return;
+  n=clamp(n,1,4);
+  FX.bobV += n===4 ? 1.92 : 0.37+(n-1)*0.30;
+ },
+ thud(){
+  if(!CFG.bob) return;
+  FX.bobV += 0.12;
+ },
+ step(dt){
+  const f=dt/16.67;
+  for(let i=FX.banners.length-1;i>=0;i--){
+   const b=FX.banners[i]; b.life-=0.012*f; b.y-=0.4*f;
+   if(b.life<=0) FX.banners.splice(i,1);
+  }
+  for(let i=FX.clearBanners.length-1;i>=0;i--){
+   const b=FX.clearBanners[i]; b.t+=dt;
+   if(b.t>=CLEAR_TXT_MS) FX.clearBanners.splice(i,1);
+  }
+  if(FX.bob||FX.bobV){
+   if(FX.bobV>0){
+    FX.bobV-=FX.bob*BOB_STIFF*f;
+    FX.bobV*=Math.pow(BOB_DAMP,f);
+    if(FX.bobV<0) FX.bobV=0;
+   }else{
+    FX.bobV-=FX.bob*BOB_UP_STIFF*f;
+    FX.bobV*=Math.pow(BOB_UP_DAMP,f);
+   }
+   FX.bob +=FX.bobV*f;
+   if(Math.abs(FX.bob)<0.002 && Math.abs(FX.bobV)<0.002){ FX.bob=0; FX.bobV=0; }
+  }
+ }
+};
+function render(g, opp){
+ if(!L) resizeCanvas();
+ if(!g){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  return;
+ }
+ const foes=g.mode==="versus"?Math.min(3,(opp||[]).length):0;
+ if(TWIN!==foes){ TWIN=foes; computeLayout(); }
+ ctx.setTransform(1,0,0,1,0,0);
+ ctx.clearRect(0,0,cv.width,cv.height);
+ ctx.setTransform(DPR,0,0,DPR,0,0);
+ // quantised like block()'s own rounding: a fractional give shifted every
+ // already-pixel-aligned tile off-pixel, seaming them on hard drop
+ if(FX.bob) ctx.translate(0,Math.round(FX.bob*L.cell*DPR)/DPR);
+ drawWell(g);
+ if(g.mode==="versus") (opp||[]).slice(0,3).forEach((f,i)=>drawOpponent(f,i,g));
+ drawGarbageMeter(g);
+ drawSpeedBar(g);
+ drawHold(g);
+ drawClearText();
+ drawNext(g);
+ drawSide(g);
+ if(COUNT>0 && g===G) drawCountdown();
+ else if(startHoldEnd && g===G) drawStartText();
+ drawBanners();
+ ctx.setTransform(1,0,0,1,0,0);
+}
+function drawWell(g){
+ const {bx,by,bw,bh,cell}=L;
+ ctx.fillStyle=rgba(INK.well,WELL_A); ctx.fillRect(bx,by,bw,bh);
+ if(CFG.grid){
+  ctx.strokeStyle=INK.grid; ctx.lineWidth=1.1;
+  ctx.beginPath();
+  for(let x=1;x<COLS;x++){ ctx.moveTo(bx+x*cell,by); ctx.lineTo(bx+x*cell,by+bh); }
+  for(let y=1;y<VIS_ROWS;y++){ ctx.moveTo(bx,by+y*cell); ctx.lineTo(bx+bw,by+y*cell); }
+  ctx.stroke();
+ }
+ ctx.save();
+ ctx.beginPath(); ctx.rect(bx,by,bw,bh); ctx.clip();
+ const stack = g.clearing ? g.clearing.board : g.board;
+ for(let y=BUFFER;y<ROWS;y++){
+  const sy=by+(y-BUFFER)*cell;
+  for(let x=0;x<COLS;x++){
+   const c=stack[y][x]; if(!c) continue;
+   block(bx+x*cell,sy,cell,c);
+  }
+ }
+ if(!g.over && !g.clearing && g.cur){
+  if(CFG.ghost){
+   const gy=g.ghostY();
+   if(gy!==g.cur.y) ghostPiece(g.cur.t,g.cur.r,g.cur.x,gy,bx,by,cell);
+  }
+  const lockP = g.grounded ? clamp(g.lockTimer/LOCK_MS,0,1) : 0;
+  for(const [cx,cy] of g.cells(g.cur.x,g.cur.y,g.cur.r))
+   if(cy>=BUFFER) block(bx+cx*cell,by+(cy-BUFFER)*cell,cell,g.cur.t,1-lockP*0.25);
+ }
+ ctx.restore();
+ wellEdge(bx,by,bw,bh,cell);
+ if(g.over){
+  ctx.fillStyle="rgba(10,10,12,.86)"; ctx.fillRect(bx,by,bw,bh);
+  const label=g.spectating?T("g_spectating"):(g.won?T("g_clear"):T("g_over"));
+  const col=g.spectating?INK.faint:(g.won?INK.fg:INK.danger);
+  textFit(label,bx+bw/2,by+bh/2,TS(1.0),col,"center",600,TS(1.0)*0.14,bw*0.9);
+ }
+ if(g.paused && !g.over){
+  ctx.fillStyle="rgba(10,10,12,.86)"; ctx.fillRect(bx,by,bw,bh);
+  textFit(T("g_paused"),bx+bw/2,by+bh/2,TS(0.95),INK.fg,"center",600,TS(0.95)*0.16,bw*0.9);
+ }
+}
+function drawSpeedBar(g){
+ if(!g.limit) return;
+ const b=L.fuse, p=clamp(g.fuse/g.limit,0,1);
+ ctx.strokeStyle=INK.line; ctx.lineWidth=1;
+ // on the pixel grid, not straddling it: a half-pixel rect blurs into two rows
+ const q=v=>Math.round(v*DPR)/DPR+0.5/DPR;
+ ctx.strokeRect(q(b.x),q(b.y),Math.round(b.w),Math.round(b.h));
+ if(p<=0) return;
+ ctx.fillStyle = p<=0.34 ? INK.danger : INK.dim;
+ ctx.fillRect(b.x,b.y,b.w*p,b.h);
+}
+function drawGarbageMeter(g){
+ if(g.mode!=="versus"||!g.attacks) return;
+ const {gx,gy,gw,gh,cell}=L;
+ const p=g.pendingCount();
+ ctx.strokeStyle=INK.line; ctx.lineWidth=1;
+ ctx.strokeRect(gx-.5,gy-.5,gw+1,gh+1);
+ if(p<=0) return;
+ const h=Math.min(gh,p*cell);
+ ctx.fillStyle=INK.danger;
+ ctx.fillRect(gx,gy+gh-h,gw,h);
+ ctx.strokeStyle="rgba(10,10,12,.55)"; ctx.lineWidth=1; ctx.beginPath();
+ for(let i=1;i<Math.min(p,20);i++){ const y=gy+gh-i*cell; ctx.moveTo(gx,y); ctx.lineTo(gx+gw,y); }
+ ctx.stroke();
+}
+function wellEdge(x,y,w,h,cell){
+ ctx.strokeStyle=INK.frame; ctx.lineWidth=Math.max(1.1,cell*0.055);
+ ctx.beginPath();
+ ctx.moveTo(x,y); ctx.lineTo(x,y+h); ctx.lineTo(x+w,y+h); ctx.lineTo(x+w,y);
+ ctx.stroke();
+}
+function caption(b,title){
+ const sz=Math.min(TS(0.42),b.w*0.20);
+ textFit(title,b.x+L.cell*0.30,b.y+L.cell*0.28+sz,sz,INK.faint,"left",600,sz*0.12,b.w-L.cell*0.6);
+}
+function drawHold(g){
+ const b=L.hold;
+ caption(b,T("g_hold"));
+ if(g.hold){
+  ctx.save();
+  ctx.globalAlpha=g.holdUsed?0.28:1;
+  preview(g.hold,b.x+b.w/2,b.y+L.cell*1.15+(b.h-L.cell*1.15)/2,L.tile);
+  ctx.restore();
+ }
+}
+const CLEAR_FONT=s=>`600 ${s}px ${CANVAS_FONT}`;
+function clearFit(str,x,y,size,color,maxW){
+ let s=size, txt=String(str).toUpperCase();
+ const wOf=()=>{ ctx.font=CLEAR_FONT(s); return ctx.measureText(txt).width; };
+ for(let i=0;i<40 && wOf()>maxW && s>6.5;i++) s-=Math.max(0.4,s*0.07);
+ ctx.font=CLEAR_FONT(s);
+ ctx.fillStyle=color; ctx.textAlign="center"; ctx.textBaseline="alphabetic";
+ ctx.fillText(txt,x,y);
+ return s;
+}
+function drawClearText(){
+ if(!FX.clearBanners.length) return;
+ const b=L.hold, cx=b.x+b.w/2, maxW=b.w*0.94;
+ let y=L.by+L.bh*0.48-L.cell*2;
+ for(const banner of FX.clearBanners){
+  const t=banner.t;
+  const a = t<CLEAR_TXT_IN ? t/CLEAR_TXT_IN
+      : t<CLEAR_TXT_IN+CLEAR_TXT_HOLD ? 1
+      : Math.max(0,1-(t-CLEAR_TXT_IN-CLEAR_TXT_HOLD)/CLEAR_TXT_OUT);
+  if(a<=0) continue;
+  const sz=banner.big?TS(1.1):TS(0.85);
+  ctx.globalAlpha=a;
+  const used=clearFit(banner.txt,cx,y,sz,INK.fg,maxW);
+  ctx.globalAlpha=1;
+  y+=used*1.7;
+ }
+}
+function drawNext(g){
+ const b=L.next;
+ caption(b,T("g_next"));
+ const top=b.y+L.cell*1.2;
+ g.bag.peek(5).forEach((p,i)=>{
+  ctx.globalAlpha=i===0?1:0.5;
+  preview(p,b.x+b.w/2,top+L.step*(i+0.5),i===0?L.ntile:L.ntile*0.84);
+  ctx.globalAlpha=1;
+ });
+}
+function drawOpponent(opp,i,g){
+ const b=L.opps&&L.opps[i];
+ if(!b) return;
+ const cell=b.w/COLS;
+ ctx.fillStyle=rgba(INK.well,WELL_A); ctx.fillRect(b.x,b.y,b.w,b.h);
+ if(CFG.grid && cell>5){
+  ctx.strokeStyle=INK.grid; ctx.lineWidth=1;
+  ctx.beginPath();
+  for(let x=1;x<COLS;x++){ ctx.moveTo(b.x+x*cell,b.y); ctx.lineTo(b.x+x*cell,b.y+b.h); }
+  for(let y=1;y<VIS_ROWS;y++){ ctx.moveTo(b.x,b.y+y*cell); ctx.lineTo(b.x+b.w,b.y+y*cell); }
+  ctx.stroke();
+ }
+ if(opp&&opp.board){
+  for(let y=0;y<VIS_ROWS;y++) for(let x=0;x<COLS;x++){
+   const c=opp.board[y*COLS+x];
+   if(!c||c===".") continue;
+   block(b.x+x*cell,b.y+y*cell,cell,c.toUpperCase(),c===c.toLowerCase()?0.85:1);
+  }
+ }
+ wellEdge(b.x,b.y,b.w,b.h,cell);
+ const nm=((opp&&opp.name)||T("opponent")).slice(0,12);
+ const sz=Math.min(TS(0.42),b.w*0.115);
+ const nmY=b.y+b.h+sz*0.95;
+ const race=!!(g&&g.clock);
+ // short of the full board width, so a name never runs up against the label
+ // of the board sitting beside it
+ textFit(nm,b.x,nmY,sz,INK.faint,"left",600,sz*0.1,b.w*(race?0.56:0.92));
+ if(race) textFit(((opp&&opp.score)|0).toLocaleString(),b.x+b.w,nmY,sz,INK.dim,"right",600,0,b.w*0.42);
+ if(opp&&opp.dead){
+  ctx.fillStyle="rgba(10,10,12,.86)"; ctx.fillRect(b.x,b.y,b.w,b.h);
+  textFit(T(race?"g_done":"g_ko"),b.x+b.w/2,b.y+b.h/2,Math.min(TS(1.0),b.w*0.30),race?INK.faint:INK.danger,"center",600,0,b.w*0.9);
+ }
+}
+function drawSide(g){
+ const h=L.hud;
+ const items = g.mode==="sprint"
+  ? [[T("g_left"),Math.max(0,40-g.lines)+"/40"]]
+  : g.mode==="versus"
+  ? (g.attacks ? [[T("g_sent"),g.attackSent],[T("g_lines"),g.lines]]
+         : [[T("g_score"),g.score.toLocaleString()],[T("g_lines"),g.lines]])
+  : g.mode==="speed"
+  ? [[T("g_lines"),g.lines],[T("g_level"),g.level]]
+  : [[T("g_score"),g.score.toLocaleString()],[T("g_level"),g.level]];
+ const rows=items.length+1;
+ const rx=h.r-L.cell*0.22;
+ const keySz=Math.min(TS(0.40),h.w*0.165);
+ const valSz=Math.min(TS(0.80),h.w*0.34);
+ const drop=valSz*1.05;
+ const pitch=Math.min(keySz+drop+L.cell*0.55, h.h/rows);
+ const top=h.y+h.h-drop-pitch*(rows-1);
+ // measured from rx, not the full column: a seven-figure score ran off-canvas
+ const availW=Math.max(1,rx-h.x);
+ const key=(k,y)=>textFit(k,rx,y,keySz,INK.faint,"right",500,keySz*0.1,availW);
+ items.forEach(([k,v],i)=>{
+  const y=top+pitch*i;
+  key(k,y);
+  textFit(String(v),rx,y+drop,valSz,INK.dim,"right",600,0,availW);
+ });
+ const y=top+pitch*(rows-1);
+ key(T(g.clock?"g_timeleft":"g_time"),y);
+ clock(g,rx,y+drop,availW,valSz);
+}
+function clock(g,rx,y,maxW,size){
+ const el=g.clock ? g.left/1000 : ((g.endedAt||now())-g.startedAt)/1000;
+ const face=String(Math.floor(el/60)).padStart(2,"0")+":"+String(Math.floor(el%60)).padStart(2,"0");
+ const cs="."+String(Math.floor((el*100)%100)).padStart(2,"0");
+ const wOf=(t,s)=>{ ctx.font="600 "+s+"px "+CANVAS_FONT; return ctx.measureText(t).width; };
+ let big=size, small=big*0.62;
+ for(let i=0;i<20 && wOf(face,big)+wOf(cs,small)>maxW && big>7;i++){ big*=0.93; small=big*0.62; }
+ text(cs,rx,y,small,INK.dim,"right",600);
+ text(face,rx-wOf(cs,small),y,big,INK.dim,"right",600);
+}
+function drawStandby(label,scale=1){
+ ctx.fillStyle="rgba(10,10,12,.62)";
+ ctx.fillRect(L.bx,L.by,L.bw,L.bh);
+ const sz=Math.min(L.cell*5,L.bw*0.8)*scale;
+ textFit(label,L.bx+L.bw/2,L.by+L.bh/2+sz*0.36,sz,INK.fg,"center",600,sz*0.14,L.bw*0.9);
+}
+function drawCountdown(){ drawStandby(String(Math.ceil(COUNT))); }
+function drawStartText(){ drawStandby(T("g_go"),0.6); }
+function drawBanners(){
+ const cx=L.bx+L.bw/2;
+ FX.banners.forEach((b,i)=>{
+  const sz=b.big?TS(0.9):TS(0.68);
+  const y=L.by+L.bh*0.30+i*sz*1.5+b.y;
+  ctx.globalAlpha=clamp(b.life*1.6,0,1);
+  textFit(b.txt,cx,y,sz,INK.fg,"center",600,sz*0.1,L.bw*0.94);
+  ctx.globalAlpha=1;
+ });
+}
+// which thing the player is actually holding, so the UI can match it
+const LastDevice = {
+ kind: isCoarse()?"touch":"key",
+ note(k){ if(this.kind===k) return; this.kind=k; if(document.body) document.body.dataset.dev=k; }
+};
+const Input = {
+ held:{left:false,right:false,softDrop:false},
+ dir:0, dasTimer:0, arrTimer:0, soft:false,
+ press(k){
+  if(!G || G.over) { if(k==="pause") UI.togglePause(); return; }
+  if(COUNT>0 || startHoldEnd) { if(k==="pause") UI.togglePause(); return; }
+  // soft drop used to latch its flag here, so resuming ran with fast gravity
+  if(G.paused) { if(k==="pause") UI.togglePause(); return; }
+  switch(k){
+   case "left":  this.held.left=true;  this.setDir(-1); break;
+   case "right": this.held.right=true; this.setDir(1);  break;
+   case "softDrop":
+    this.held.softDrop=true; this.soft=true;
+    if(!G.paused) G.softDrop();
+    break;
+   case "hardDrop": if(!G.paused){ G.hardDrop(); } break;
+   case "rotR": if(!G.paused) G.rotate(1); break;
+   case "rotL": if(!G.paused) G.rotate(-1); break;
+   case "rot180": if(!G.paused) G.rotate180(); break;
+   case "hold": if(!G.paused) G.holdPiece(); break;
+   case "pause": UI.togglePause(); break;
+  }
+ },
+ release(k){
+  switch(k){
+   case "left":  this.held.left=false;  this.setDir(this.held.right?1:0); break;
+   case "right": this.held.right=false; this.setDir(this.held.left?-1:0); break;
+   case "softDrop": this.held.softDrop=false; this.soft=false; break;
+  }
+ },
+ setDir(d){
+  if(d===this.dir) return;
+  this.dir=d; this.dasTimer=0; this.arrTimer=0;
+  if(d!==0 && G && !G.paused && !G.over) G.move(d,0);
+ },
+ tick(dt){
+  if(!G||G.paused||G.over||this.dir===0) return;
+  this.dasTimer+=dt;
+  if(this.dasTimer<CFG.das) return;
+  if(CFG.arr<=0){
+   while(G.move(this.dir,0));
+   return;
+  }
+  this.arrTimer+=dt;
+  while(this.arrTimer>=CFG.arr){
+   this.arrTimer-=CFG.arr;
+   if(!G.move(this.dir,0)) break;
+  }
+ },
+ reset(){ this.held={left:false,right:false,softDrop:false}; this.dir=0; this.soft=false; this.dasTimer=this.arrTimer=0; }
+};
+const ACTIONS=["left","right","softDrop","hardDrop","rotR","rotL","rot180","hold","pause"];
+const KEYS_DEFAULT={
+ left:["ArrowLeft"], right:["ArrowRight"], softDrop:["ArrowDown"], hardDrop:["Space"],
+ rotR:["ArrowUp","KeyX"], rotL:["KeyZ","ControlLeft"], rot180:["KeyA"],
+ hold:["KeyC","ShiftLeft"], pause:["Escape"]
+};
+const PADS_DEFAULT={
+ left:[14], right:[15], softDrop:[13], hardDrop:[12],
+ rotR:[1,3], rotL:[0,2], rot180:[], hold:[4,5,6,7], pause:[9]
+};
+const fillBinds=(cur,def)=>{
+ const out={};
+ for(const a of ACTIONS) out[a]=(cur&&Array.isArray(cur[a]))?cur[a].slice():def[a].slice();
+ return out;
+};
+CFG.keys=fillBinds(CFG.keys,KEYS_DEFAULT);
+CFG.pads=fillBinds(CFG.pads,PADS_DEFAULT);
+const keyAction = code => ACTIONS.find(a=>CFG.keys[a].includes(code));
+const downKeys=new Set();
+let BINDING=null;
+addEventListener("keydown",e=>{
+ if(BINDING){ e.preventDefault(); BINDING(e.code); return; }
+ const k=keyAction(e.code);
+ if(!k) return;
+ e.preventDefault();
+ if(downKeys.has(e.code)) return;
+ downKeys.add(e.code);
+ LastDevice.note("key");
+ Input.press(k);
+},{passive:false});
+addEventListener("keyup",e=>{
+ const k=keyAction(e.code);
+ if(!k) return;
+ downKeys.delete(e.code);
+ Input.release(k);
+});
+addEventListener("blur",()=>{ downKeys.clear(); Input.reset(); });
+const PAD_DZ=0.55, PAD_WAKE=0.6;
+const Pad = {
+ prev:{}, axis:0, axisDown:false, watching:null,
+ seen:new Map(), live:null,
+ activeId(){ return this.live; },
+ // a bluetooth keyboard can enumerate through the Gamepad API, so a device
+ // counts only once it has actually produced input, and its first-seen axis
+ // values are its zero — a resting offset used to latch a direction forever
+ vet(gp){
+  let s=this.seen.get(gp.id);
+  if(!s){ s={rest:Array.from(gp.axes,v=>v||0), used:false}; this.seen.set(gp.id,s); }
+  if(!s.used && (gp.buttons.some(b=>b&&b.pressed) ||
+    Array.from(gp.axes).some((v,i)=>Math.abs((v||0)-(s.rest[i]||0))>PAD_WAKE))) s.used=true;
+  return s;
+ },
+ pick(){
+  let best=null, bestS=null;
+  for(const g of (navigator.getGamepads()||[])){
+   if(!g||!g.connected) continue;
+   const s=this.vet(g);
+   if(!s.used) continue;
+   if(!best || (g.mapping==="standard" && best.mapping!=="standard")){ best=g; bestS=s; }
+  }
+  const id=best?best.id:null;
+  if(id!==this.live){ this.prev={}; this.axis=0; this.axisDown=false; this.live=id; }
+  return best?{gp:best, rest:bestS.rest}:null;
+ },
+ poll(){
+  if(!navigator.getGamepads) return;
+  if(!CFG.padOn && !this.watching) return;
+  const sel=this.pick();
+  if(!sel){ this.prev={}; return; }
+  const gp=sel.gp, rest=sel.rest;
+  if(this.watching){
+   for(let i=0;i<gp.buttons.length;i++) if(gp.buttons[i].pressed && !this.prev[i]){ this.watching(i); break; }
+  }
+  // a menu is up: the pad drives the menu, not the piece
+  if(!this.watching && MenuNav.root()){
+   for(const b in MENU_PAD){
+    const on=!!(gp.buttons[b]&&gp.buttons[b].pressed);
+    if(on && !this.prev[b]){ LastDevice.note("pad"); MenuNav.act(MENU_PAD[b]); }
+   }
+   for(let i=0;i<gp.buttons.length;i++) this.prev[i]=gp.buttons[i].pressed;
+   return;
+  }
+  for(const a of ACTIONS){
+   const on=!this.watching && CFG.pads[a].some(i=>gp.buttons[i]&&gp.buttons[i].pressed);
+   if(on && !this.prev["a:"+a]){ LastDevice.note("pad"); Input.press(a); }
+   else if(!on && this.prev["a:"+a]) Input.release(a);
+   this.prev["a:"+a]=on;
+  }
+  for(let i=0;i<gp.buttons.length;i++) this.prev[i]=gp.buttons[i].pressed;
+  const x=(gp.axes[0]||0)-(rest[0]||0), y=(gp.axes[1]||0)-(rest[1]||0);
+  const dir=x<-PAD_DZ?-1:x>PAD_DZ?1:0;
+  if(dir!==this.axis){
+   if(this.axis===-1) Input.release("left"); else if(this.axis===1) Input.release("right");
+   if(dir===-1){ LastDevice.note("pad"); Input.press("left"); }
+   else if(dir===1){ LastDevice.note("pad"); Input.press("right"); }
+   this.axis=dir;
+  }
+  const down=y>PAD_DZ;
+  if(down!==this.axisDown){ if(down){ LastDevice.note("pad"); Input.press("softDrop"); } else Input.release("softDrop"); this.axisDown=down; }
+ }
+};
+// gestures are measured against a fixed reference, not the rendered cell: tying
+// them to L.cell made a smaller board (or a versus layout) three times twitchier
+const SWIPE_REF_PX=24;
+// the whole window is swipeable; #screen is exactly the canvas box, so the
+// touch area used to shrink with the board
+const SwipeArea = () => document.body;
+const SWIPE_SKIP=".mi,.pausebtn,#dpad-wrap,#act-wrap,.veil,.pause-menu";
+const Swipe = {
+ id:null, x0:0, y0:0, t0:0, lx:0, ly:0, moved:0, dropped:false, swapped:false, hold:false,
+ cell(){ return SWIPE_REF_PX; },
+ inHold(x,y){
+  const b=L&&L.hold; if(!b) return false;
+  const r=$("#cv").getBoundingClientRect();
+  const px=x-r.left, py=y-r.top;
+  return px>=b.x && px<=b.x+b.w && py>=b.y && py<=b.y+b.h;
+ },
+ down(e){
+  if(CFG.touch!=="swipe" || !G || G.over || G.paused) return;
+  if(e.target && e.target.closest && e.target.closest(SWIPE_SKIP)) return;
+  if(this.id!==null) return;
+  LastDevice.note("touch");
+  this.id=e.pointerId;
+  this.x0=this.lx=e.clientX; this.y0=this.ly=e.clientY; this.t0=now();
+  this.moved=0; this.dropped=false; this.swapped=false;
+  this.hold=this.inHold(e.clientX,e.clientY);
+ },
+ move(e){
+  if(this.id!==e.pointerId || this.dropped) return;
+  const c=this.cell();
+  const stepX=c*CFG.swMove/100, stepY=c*CFG.swDrop/100, flick=CFG.swFlick/100;
+  let dx=e.clientX-this.lx;
+  while(Math.abs(dx)>=stepX){
+   const step=dx>0?1:-1;
+   Input.press(step>0?"right":"left"); Input.release(step>0?"right":"left");
+   this.lx+=step*stepX; dx=e.clientX-this.lx;
+   this.moved++; this.hold=false;
+  }
+  const up=this.y0-e.clientY;
+  if(!this.swapped && up>c*1.5 && Math.abs(e.clientX-this.x0)<up*0.9){
+   Input.press("hold");
+   this.swapped=true; this.moved++; this.hold=false;
+   return;
+  }
+  const dy=e.clientY-this.y0, dt=Math.max(1,now()-this.t0);
+  if(dy>c*1.6 && dy/dt>flick && Math.abs(e.clientX-this.x0)<dy*0.8){
+   Input.press("hardDrop");
+   this.dropped=true; this.moved++; this.hold=false;
+   return;
+  }
+  let vy=e.clientY-this.ly;
+  while(vy>=stepY){
+   Input.press("softDrop"); Input.release("softDrop");
+   this.ly+=stepY; vy=e.clientY-this.ly;
+   this.moved++; this.hold=false;
+  }
+ },
+ up(e){
+  if(this.id!==e.pointerId) return;
+  const quick=now()-this.t0<260, still=this.moved===0;
+  if(!this.dropped && quick && still){
+   if(this.hold) Input.press("hold");
+   else Input.press("rotR");
+  }
+  this.id=null; this.hold=false; this.swapped=false;
+ }
+};
+{
+ const sc=SwipeArea();
+ sc.addEventListener("pointerdown",e=>{ Swipe.down(e); },{passive:true});
+ sc.addEventListener("pointermove",e=>{ Swipe.move(e); },{passive:true});
+ sc.addEventListener("pointerup",e=>Swipe.up(e));
+ sc.addEventListener("pointercancel",e=>{ Swipe.id=null; });
+}
+$$("[data-k]").forEach(el=>{
+ const k=el.dataset.k;
+ const down=e=>{
+  e.preventDefault();
+  el.classList.add("hit");
+  if(e.pointerId!=null && el.setPointerCapture) { try{el.setPointerCapture(e.pointerId);}catch(_){} }
+  if(navigator.vibrate) navigator.vibrate(8);
+  Input.press(k);
+ };
+ const up=e=>{ el.classList.remove("hit"); Input.release(k); };
+ el.addEventListener("pointerdown",down,{passive:false});
+ el.addEventListener("pointerup",up);
+ el.addEventListener("pointercancel",up);
+ el.addEventListener("lostpointercapture",up);
+ el.addEventListener("contextmenu",e=>e.preventDefault());
+});
+let G=null;
+let FOES=[];
+let COUNT=0, countEnd=0;
+const START_TXT_MS=700;
+let startHoldEnd=0;
+const READY_P2P={me:false,peer:false};
+const WINS_P2P ={me:0,peer:0};
+// whatever the sender said it was, cut or padded to what this client draws
+function fitBoard(s){
+ const n=COLS*VIS_ROWS; s=String(s||"");
+ return s.length===n ? s : (s.length>n ? s.slice(0,n) : s+".".repeat(n-s.length));
+}
+function mirrorFoes(others){
+ FOES=others.map(p=>{
+  const was=FOES.find(f=>f.pid===p.pid);
+  const f=was||{pid:p.pid,board:null,score:0,ms:0};
+  f.name=p.n; f.dead=p.d; f.wins=p.w; f.ms=p.ms|0;
+  if(p.b){ f.board=fitBoard(Grid.dec(p.b.d||"")); f.score=p.b.p|0; if(p.b.o) f.dead=true; }
+  return f;
+ });
+}
+const TIE_SETTLE=700, TIE_CAP=2000;
+// every client sorts the same published durations, so all of them name the same winner
+function resolveRound(){
+ if(!G||G.mode!=="versus"||!G.attacks||G.resolved||G.spectating||G.stranded) return;
+ // no round is won before it starts: during the countdown the tree can still
+ // carry last round's death flags, and one of them reads as a last man standing
+ if(COUNT>0) return;
+ const room = RoomClient.on;
+ const rv = room ? RoomClient.view() : null;
+ if(!G.over){
+  if(!room || !rv.roster || Object.keys(rv.roster).length<2) return;
+  if(rv.alive.length===1 && rv.alive[0].pid===PID){
+   G.resolved=true;
+   RoomClient.bumpWin().catch(()=>{});
+   G.win();
+  }
+  return;
+ }
+ if(!G.pending) return;
+ const since=now()-G.pendingAt;
+ const lose=()=>{ G.resolved=true; G.pending=false; UI.gameOver(false); };
+ const take=()=>{
+  G.resolved=true; G.pending=false;
+  if(room) RoomClient.bumpWin().catch(()=>{});
+  G.outlasted();
+  UI.gameOver(true);
+ };
+ const field = room
+  ? rv.seats.filter(s=>s.pid!==PID && RoomState.inRound(rv,s.pid)).map(s=>({pid:s.pid, done:s.d, ms:s.ms}))
+  : (FOES[0] ? [{pid:"peer", done:!!FOES[0].dead, ms:FOES[0].ms|0}] : []);
+ if(field.length && field.every(p=>p.done && p.ms>0)){
+  const mine=G.lasted();
+  let iWin;
+  if(room){
+   const all=field.concat([{pid:PID, ms:mine}]).sort((a,b)=> (b.ms-a.ms) || (a.pid<b.pid?-1:1));
+   iWin = all[0].pid===PID;
+  }else{
+   iWin = mine>field[0].ms || (mine===field[0].ms && Net.role==="host");
+  }
+  if(iWin) take(); else lose();
+  return;
+ }
+ if(since < TIE_SETTLE) return;
+ if(field.some(p=>p.done && !(p.ms>0)) && since < TIE_CAP) return;
+ lose();
+}
+// a hidden tab stops ticking, and nobody can be last standing while a frozen well counts as alive
+function dropOut(){
+ if(!G || G.over || G.mode!=="versus") return;
+ G.away=true;
+ G.die();
+ drainEvents();
+}
+const TALLY_MS=4000;
+// no score means anything until every well has stopped; the wait is capped
+function settleScore(){
+ if(!G.doneAt) G.doneAt=now();
+ const rv=RoomClient.on?RoomClient.view():null;
+ const foes=rv ? FOES.filter(f=>RoomState.inRound(rv,f.pid)) : FOES;
+ if(foes.some(f=>!f.dead) && now()-G.doneAt<TALLY_MS) return;
+ G.settled=true;
+ // an empty field is not a win: reducing over nothing gave best=-1, so every
+ // client beat it and every client claimed the round
+ if(!foes.length){ UI.tallied(false,true,0); return; }
+ const best=foes.reduce((m,f)=>Math.max(m,f.score|0),-1);
+ const won=G.score>best;
+ if(won) G.won=true;
+ UI.tallied(won,G.score===best,best);
+}
+function startMatch(){
+ if(G && G.mode==="versus" && !G.over) return;
+ Net.lastB="";
+ const meSeat=RoomClient.on ? RoomClient.view().seats.find(s=>s.pid===PID) : null;
+ const spectating=!!(meSeat&&meSeat.spec);
+ if(RoomClient.on){
+  // /live and /gb are wiped by the host in callStart(), before the go event
+  // that got us here: deleting this seat's own /live from here instead raced
+  // the first board publish of the round it was supposed to be clearing for
+  Sig.patch(RoomClient.mine(),{rdy:false}).catch(()=>{});
+ }else{
+  NET_SEED = advanceSeed(NET_SEED);
+  READY_P2P.me=false; READY_P2P.peer=false;
+ }
+ UI.renderRoom();
+ UI.closeAll();
+ startGame("versus");
+ if(spectating){ G.spectating=true; G.over=true; }
+}
+let rafId=0, lastT=0, sendAcc=0;
+function startGame(mode){
+ clearTimeout(boardDrop); boardDrop=0;   // a fade still pending would null this new well
+ clearTimeout(goTimer); goTimer=0;       // and a result card armed by the last run
+ ;                             // and notes queued by the last run must not play over this one
+ UI.hideGameOver(); UI.closePauseMenu();
+ G=new Game(mode);
+ COUNT=3; countEnd=now()+3000; startHoldEnd=0;
+ if(mode==="versus"){
+  // RoomClient.starting is deliberately left alone: onRound() re-arms it right
+  // after this call, and zeroing it here killed the only guard against the
+  // host firing a second go signal on the very next stream event
+  FOES.forEach(f=>{ f.board=null; f.score=0; f.dead=false; f.ms=0; });
+ }
+ else FOES=[];
+ FX.banners.length=0; FX.clearBanners.length=0; FX.bob=FX.bobV=0;
+ Input.reset();
+ UI.closeAll();
+ if(!rafId) loop(now());
+}
+function loop(t){
+ rafId=requestAnimationFrame(loop);
+ const dt=Math.min(64, t-lastT||16); lastT=t;
+ if(G){
+  if(COUNT>0 && !G.over){
+   if(G.paused) countEnd=now()+COUNT*1000;
+   else{
+    COUNT=Math.max(0,(countEnd-now())/1000);
+    G.startedAt=now();                    // held at now so lasted() measures play, not the wait
+    if(COUNT<=0) startHoldEnd=now()+START_TXT_MS;
+   }
+  }else if(startHoldEnd && !G.over){
+   if(G.paused) startHoldEnd+=dt;
+   else{
+    G.startedAt=now();
+    if(now()>=startHoldEnd) startHoldEnd=0;
+   }
+  }else{
+   Input.tick(dt);
+   G.tick(dt,{soft:Input.soft});
+  }
+  drainEvents();
+  resolveRound();
+  if(G.rule==="score" && G.over && !G.settled && !G.spectating && !G.stranded) settleScore();
+ }
+ FX.step(dt);
+ render(G,G?FOES:null);
+ if(!G){ cancelAnimationFrame(rafId); rafId=0; return; }
+ Pad.poll();
+ if(G && G.mode==="versus" && !G.spectating && Net.ready()){
+  sendAcc+=dt;
+  if(sendAcc>=(RoomClient.on?ROOM_MS:80)){
+   sendAcc=0;
+   Net.send({t:"b",d:G.snapshot(),s:G.attackSent,p:G.score,o:G.over});
+  }
+ }
+}
+function drainEvents(){
+ FX.clearGen++;
+ while(G.events.length){
+  const ev=G.events.shift();
+  switch(ev.e){
+   case "text": FX.clearText(ev.text,ev.kind==="big"||ev.kind==="pc"); break;
+   case "clear": FX.bump(ev.n); break;
+   case "drop": FX.thud(); break;
+   case "attack":
+    if(G.mode==="versus" && Net.ready()){
+     if(RoomClient.on){
+      const live=RoomClient.view().alive.filter(s=>s.pid!==PID);
+      if(live.length){
+       const t=live[rnd(live.length)];
+       RoomClient.sendAttack(t.pid,ev.lines).catch(()=>{});
+       FX.banner(T("b_sendto",{n:ev.lines,who:t.n}),"combo");
+      }
+     }else{
+      Net.send({t:"a",n:ev.lines});
+      FX.banner(T("b_send",{n:ev.lines}),"combo");
+     }
+    }
+    break;
+   case "dead":
+    // awaited with retry inside: a dropped death left the round with no winner
+    if(RoomClient.on){ RoomClient.publishDeath(G.lasted()).catch(()=>{}); }
+    else if(Net.ready()) Net.send({t:"d", ms:G.lasted()});
+    if(G.rule==="score") UI.matchPending();
+    else if(G.mode==="versus" && !G.spectating && !G.stranded){ G.pending=true; G.pendingAt=now(); }
+    else UI.gameOver(false);
+    break;
+   case "win": UI.gameOver(true); break;
+  }
+ }
+}
+function rtcConfig(){
+ return {
+  iceServers:[
+   {urls:["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302",
+       "stun:stun2.l.google.com:19302","stun:stun.cloudflare.com:3478"]}
+  ],
+  iceCandidatePoolSize:2
+ };
+}
+const FPALG=["sha-256","sha-1","sha-384","sha-512"], FPLEN=[32,20,48,64];
+const SETUP=["actpass","active","passive","holdconn"];
+const CTYPE=["host","srflx","prflx","relay"], TCPT=["active","passive","so"];
+const MDNS=/^([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})\.local$/i;
+function ip4(s){ const p=String(s).split("."); return p.length===4&&p.every(o=>/^\d+$/.test(o)&&+o<256)?p.map(Number):null; }
+function ip6(s){
+ if(s.indexOf(":")<0) return null;
+ const half=s.split("::");
+ if(half.length>2) return null;
+ const head=half[0]?half[0].split(":"):[], tail=half[1]?half[1].split(":"):[];
+ const fill=8-head.length-tail.length;
+ if(half.length===1?head.length!==8:fill<0) return null;
+ const gs=half.length===2?head.concat(new Array(fill).fill("0"),tail):head, out=[];
+ for(const g of gs){
+  if(!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
+  const v=parseInt(g,16); out.push(v>>8,v&255);
+ }
+ return out.length===16?out:null;
+}
+function ip6str(b){
+ const g=[];
+ for(let i=0;i<16;i+=2) g.push(((b[i]<<8)|b[i+1]).toString(16));
+ let bi=-1,bl=0,i=0;
+ while(i<8){ if(g[i]==="0"){ let j=i; while(j<8&&g[j]==="0") j++; if(j-i>bl){bl=j-i;bi=i;} i=j; } else i++; }
+ return bl>1 ? g.slice(0,bi).join(":")+"::"+g.slice(bi+bl).join(":") : g.join(":");
+}
+function parseSDP(sdp){
+ const one=re=>{ const m=re.exec(sdp); return m?m[1]:null; };
+ const fp=/^a=fingerprint:(\S+) (\S+)/m.exec(sdp);
+ if(!fp) return null;
+ const o={
+  ufrag:one(/^a=ice-ufrag:(\S+)/m), pwd:one(/^a=ice-pwd:(\S+)/m),
+  alg:FPALG.indexOf(fp[1].toLowerCase()), fp:fp[2].split(":").map(h=>parseInt(h,16)),
+  setup:SETUP.indexOf(one(/^a=setup:(\S+)/m)), cands:[]
+ };
+ if(!o.ufrag||!o.pwd||o.alg<0||o.setup<0) return null;
+ const re=/^a=candidate:(\S+) (\d+) (\S+) (\d+) (\S+) (\d+) typ (\S+)(.*)$/mg;
+ let m;
+ while((m=re.exec(sdp))){
+  const type=CTYPE.indexOf(m[7]);
+  if(m[2]!=="1"||type<0) continue;
+  const rest=m[8]||"", ra=/ raddr (\S+) rport (\d+)/.exec(rest), tt=/ tcptype (\S+)/.exec(rest);
+  o.cands.push({
+   type, proto:/^tcp$/i.test(m[3])?1:0, tcptype:tt?Math.max(0,TCPT.indexOf(tt[1])):0,
+   addr:m[5], port:+m[6], raddr:ra?ra[1]:null, rport:ra?+ra[2]:0
+  });
+ }
+ return o;
+}
+// strips the SDP boilerplate both ends already agree on: ~920 chars down to ~130
+function packDesc(kind,sdp,name,seed){
+ const s=parseSDP(sdp);
+ if(!s) return null;
+ const b=[];
+ const u8=v=>b.push(v&255), u16=v=>b.push((v>>8)&255,v&255);
+ const str=t=>{ const u=unescape(encodeURIComponent(t||"")), n=Math.min(255,u.length);
+         u8(n); for(let i=0;i<n;i++) u8(u.charCodeAt(i)); };
+ u8(kind|(s.alg<<2)|(s.setup<<4));
+ if(!kind) b.push((seed>>>24)&255,(seed>>>16)&255,(seed>>>8)&255,seed&255);
+ str(name); str(s.ufrag); str(s.pwd);
+ for(const v of s.fp.slice(0,FPLEN[s.alg])) u8(v);
+ const cands=s.cands.slice(0,15);
+ u8(cands.length);
+ for(const c of cands){
+  const at=b.length;
+  u8(0);
+  let form;
+  const md=MDNS.exec(c.addr), v4=ip4(c.addr), v6=v4?null:ip6(c.addr);
+  if(md){ const h=md[1]+md[2]+md[3]+md[4]+md[5];
+      for(let i=0;i<32;i+=2) u8(parseInt(h.substr(i,2),16)); form=1; }
+  else if(v4){ for(const v of v4) u8(v); form=0; }
+  else if(v6){ for(const v of v6) u8(v); form=2; }
+  else { str(c.addr); form=3; }
+  u16(c.port);
+  let f=c.type|(form<<2)|(c.proto<<4)|(c.tcptype<<5);
+  const r4=c.raddr?ip4(c.raddr):null;
+  if(r4){ f|=128; for(const v of r4) u8(v); u16(c.rport); }
+  b[at]=f;
+ }
+ return b;
+}
+function unpackDesc(b){
+ let p=0;
+ const u8=()=>b[p++], u16=()=>(u8()<<8)|u8();
+ const bytes=n=>{ const o=[]; for(let i=0;i<n;i++) o.push(b[p++]); return o; };
+ const str=()=>{ const n=u8(); let s="";
+         for(let i=0;i<n;i++) s+=String.fromCharCode(b[p++]);
+         try{ return decodeURIComponent(escape(s)); }catch(e){ return s; } };
+ const h=u8(), kind=h&3, alg=(h>>2)&3, setup=(h>>4)&3;
+ if(kind>1) return null;
+ const seed=kind?0:((u8()<<24)|(u8()<<16)|(u8()<<8)|u8())>>>0;
+ const name=str(), ufrag=str(), pwd=str();
+ const fp=bytes(FPLEN[alg]).map(v=>v.toString(16).padStart(2,"0").toUpperCase()).join(":");
+ const n=u8(), lines=[];
+ for(let i=0;i<n;i++){
+  if(p>=b.length) return null;
+  const f=u8(), type=f&3, form=(f>>2)&3, proto=(f>>4)&1, tcptype=(f>>5)&3;
+  const addr=form===0?bytes(4).join(".")
+       :form===1?(()=>{ const x=bytes(16).map(v=>v.toString(16).padStart(2,"0")).join("");
+               return `${x.slice(0,8)}-${x.slice(8,12)}-${x.slice(12,16)}-${x.slice(16,20)}-${x.slice(20)}.local`; })()
+       :form===2?ip6str(bytes(16)):str();
+  const port=u16();
+  let extra="";
+  if(f&128){ const ra=bytes(4).join("."), rp=u16(); extra=` raddr ${ra} rport ${rp}`; }
+  if(proto) extra+=` tcptype ${TCPT[tcptype]||"active"}`;
+  const pri=(type===3?41885439:type===0?2113937151:1677729535)-i;
+  lines.push(`a=candidate:${i+1} 1 ${proto?"tcp":"udp"} ${pri} ${addr} ${port} typ ${CTYPE[type]}${extra}`);
+ }
+ if(p!==b.length||ufrag.length<4||pwd.length<8) return null;
+ return {
+  k:kind?"a":"o", n:name, s:seed,
+  d:{type:kind?"answer":"offer", sdp:[
+   "v=0","o=- 1 2 IN IP4 127.0.0.1","s=-","t=0 0","a=group:BUNDLE 0",
+   "a=extmap-allow-mixed","a=msid-semantic: WMS",
+   "m=application 9 UDP/DTLS/SCTP webrtc-datachannel","c=IN IP4 0.0.0.0",
+   ...lines,
+   `a=ice-ufrag:${ufrag}`,`a=ice-pwd:${pwd}`,"a=ice-options:trickle",
+   `a=fingerprint:${FPALG[alg]} ${fp}`,`a=setup:${SETUP[setup]}`,
+   "a=mid:0","a=sctp-port:5000","a=max-message-size:262144",""
+  ].join("\r\n")}
+ };
+}
+function b64enc(bytes){
+ let s="";
+ for(const v of bytes) s+=String.fromCharCode(v);
+ return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function b64dec(s){
+ s=s.replace(/[^A-Za-z0-9+/\-_=]/g,"").replace(/-/g,"+").replace(/_/g,"/").replace(/=+$/,"");
+ while(s.length%4) s+="=";
+ const t=atob(s), o=new Uint8Array(t.length);
+ for(let i=0;i<t.length;i++) o[i]=t.charCodeAt(i);
+ return o;
+}
+function encodeBlob(obj){
+ const packed=packDesc(obj.k==="o"?0:1,obj.d.sdp,obj.n,obj.s>>>0);
+ if(!packed) throw new Error(T("e_badcode"));
+ return "TFX2"+b64enc(packed);
+}
+function decodeBlob(str){
+ const s=String(str).trim();
+ const i=s.indexOf("TFX2");
+ if(i<0) throw new Error(T("e_badcode"));
+ const out=unpackDesc(b64dec(s.slice(i+4)));
+ if(!out) throw new Error(T("e_badcode"));
+ return out;
+}
+function waitIceGatheringComplete(pc){
+ return new Promise(resolve=>{
+  if(pc.iceGatheringState==="complete"){ resolve(); return; }
+  const check=()=>{
+   if(pc.iceGatheringState==="complete"){
+    pc.removeEventListener("icegatheringstatechange",check);
+    clearTimeout(to); resolve();
+   }
+  };
+  const to=setTimeout(resolve,6000);
+  pc.addEventListener("icegatheringstatechange",check);
+ });
+}
+const HB_MS=5000, SEAT_TTL=20000, LOBBY_TTL=20000, SIG_TRIES=4, SIG_BASE_MS=120,
+   LEAVE_TIMEOUT_MS=2500;
+const Sig = {
+ base(){ return (CFG.fbUrl||"").trim().replace(/\/+$/,""); },
+ on(){ return /^https?:\/\/.+/i.test(this.base()); },
+ url(p){ return this.base()+p+".json"; },
+ sleep(ms){ return new Promise(r=>setTimeout(r,ms)); },
+ // retried and awaited: a lost write is what desynchronised the old room
+ async req(path,opt,tries){
+  const n=tries==null?SIG_TRIES:tries;
+  let last=null;
+  for(let i=0;i<n;i++){
+   let r;
+   try{ r=await fetch(this.url(path),opt); }
+   catch(e){ last=new Error(T("e_fbnet")); await this.sleep(SIG_BASE_MS*(1<<i)+rnd(SIG_BASE_MS)); continue; }
+   if(r.status===412) return {conflict:true};
+   if(r.status===401||r.status===403) throw new Error(T("e_fbauth",{p:path}));
+   if(!r.ok){ last=new Error(T("e_fbnet")); await this.sleep(SIG_BASE_MS*(1<<i)+rnd(SIG_BASE_MS)); continue; }
+   const t=await r.text();
+   let v=null;
+   try{ v = t&&t!=="null" ? JSON.parse(t) : null; }catch(e){ v=null; }
+   return {value:v, etag:r.headers.get("etag")};
+  }
+  throw last||new Error(T("e_fbnet"));
+ },
+ async get(path){ return (await this.req(path,{cache:"no-store"})).value; },
+ async put(path,val){ return (await this.req(path,{method:"PUT",body:JSON.stringify(val)})).value; },
+ async patch(path,val){ return (await this.req(path,{method:"PATCH",body:JSON.stringify(val)})).value; },
+ async del(path){ await this.req(path,{method:"DELETE",keepalive:true}); },
+ // compare-and-swap: win counts were a read-modify-write on a stale snapshot
+ async cas(path,fn){
+  for(let i=0;i<SIG_TRIES;i++){
+   const r=await this.req(path,{cache:"no-store",headers:{"X-Firebase-ETag":"true"}});
+   const next=fn(r.value);
+   const w=await this.req(path,{method:"PUT",body:JSON.stringify(next),headers:{"if-match":r.etag||"*"}});
+   if(!w.conflict) return next;
+   await this.sleep(SIG_BASE_MS*(1<<i)+rnd(SIG_BASE_MS));
+  }
+  throw new Error(T("e_fbnet"));
+ },
+ stream(path,onEvent,onDead){
+  let es=null, closed=false, back=0;
+  const open=()=>{
+   if(closed) return;
+   es=new EventSource(this.url(path));
+   const on=type=>es.addEventListener(type,m=>{
+    back=0;
+    let d=null;
+    try{ d=JSON.parse(m.data); }catch(e){ return; }
+    if(d) onEvent({type, path:String(d.path||"/"), data:d.data});
+   });
+   on("put"); on("patch");
+   // the server ends the stream with one of these; unhandled, a read the rules
+   // deny left the client sitting in a room that silently never updated again
+   const dead=type=>es.addEventListener(type,()=>{
+    closed=true; try{ es.close(); }catch(e){}
+    if(onDead) onDead(type);
+   });
+   dead("cancel"); dead("auth_revoked");
+   // back drives a shift, so it has to be capped: 1<<31 is negative and takes
+   // the retry delay with it, spinning reconnects as fast as the browser allows
+   es.onerror=()=>{ try{ es.close(); }catch(e){} if(closed) return; setTimeout(open,Math.min(4000,SIG_BASE_MS*(1<<Math.min(back++,6)))); };
+  };
+  open();
+  return { close(){ closed=true; try{ es&&es.close(); }catch(e){} } };
+ }
+};
+// one writer for room state: the old object was mutated from six paths
+const RoomState = {
+ make(myPid){ return {tree:{}, me:myPid, id:null}; },
+ apply(st,ev){
+  const parts=String(ev.path||"/").split("/").filter(Boolean);
+  if(!parts.length){ st.tree = ev.type==="patch" ? Object.assign(st.tree||{},ev.data||{}) : (ev.data||{}); return; }
+  let n=st.tree;
+  for(const s of parts.slice(0,-1)){ if(!n[s]||typeof n[s]!=="object") n[s]={}; n=n[s]; }
+  const last=parts[parts.length-1];
+  if(ev.data===null||ev.data===undefined) delete n[last];
+  else if(ev.type==="patch" && n[last] && typeof n[last]==="object") Object.assign(n[last],ev.data);
+  else n[last]=ev.data;
+ },
+ view(st,nowMs){
+  const t=st.tree||{};
+  const meta=t.meta||{}, go=t.go||null, live=t.live||{};
+  const seats=Object.keys(t.seat||{}).map(pid=>{
+   const r=t.seat[pid]||{};
+   // ms timestamps overflow int32, so never |0 them
+   const hb=+r.hb||0;
+   return {pid, n:String(r.n||"").slice(0,12)||T("opponent"), j:+r.j||0, hb,
+       rdy:!!r.rdy, spec:!!r.spec, w:r.w|0, d:!!(live[pid]&&live[pid].o),
+       ms:+(live[pid]&&live[pid].ms)||0, fresh:(nowMs-hb)<SEAT_TTL};
+  }).sort((a,b)=>a.j-b.j||(a.pid<b.pid?-1:1));
+  const v={id:st.id||null, host:meta.h||null, rule:meta.r==="score"?"score":"attack",
+      go, seats, live, roster:(go&&go.roster)||null, me:st.me};
+  // fresh matters: a tab that closed without publishing a death used to count
+  // as alive forever, so no round ever found its last man standing and attacks
+  // were addressed to a seat that would never read them
+  v.alive=seats.filter(s=>!s.d && s.fresh && RoomState.inRound(v,s.pid));
+  return v;
+ },
+ // the roster is frozen by the host at go time, so every client agrees on it
+ inRound(v,pid){
+  if(!v.roster) return false;
+  const s=v.seats.find(x=>x.pid===pid);
+  return !!s && v.roster[pid]===s.j;
+ }
+};
+const RoomClient = {
+ id:null, on:false, st:null, sub:null, chatSub:null, hbTimer:null,
+ chat:[], seen:new Set(), gseq:0, gtag:"", lastGo:0, starting:0,
+ view(){ return RoomState.view(this.st||RoomState.make(PID), Date.now()); },
+ // a go signal is in flight, or the round it announced has just begun
+ busy(){ return !!this.starting && now()-this.starting<8000; },
+ isHost(){ return this.on && this.view().host===PID; },
+ path(){ return "/rooms/"+this.id; },
+ mine(){ return this.path()+"/seat/"+PID; },
+ // read-only: the old listing deleted other people's rooms as a side effect
+ async listRooms(){
+  if(!Sig.on()) throw new Error(T("e_nofb"));
+  const idx=await Sig.get("/lobby")||{};
+  const t0=Date.now();
+  return Object.keys(idx).filter(id=>t0-((idx[id]||{}).t||0)<LOBBY_TTL)
+   .map(id=>({id, name:String((idx[id]||{}).n||"").slice(0,12), count:(idx[id]||{}).c|0}));
+ },
+ async create(){
+  if(!Sig.on()) throw new Error(T("e_nofb"));
+  PID=PID||roomId(8);
+  const id=roomId(6), t=Date.now();
+  NET_RULE="attack";
+  await Sig.put("/rooms/"+id,{meta:{h:PID,r:"attack"}, seat:{[PID]:{n:CFG.name,j:t,hb:t,w:0}}});
+  await Sig.put("/lobby/"+id,{n:CFG.name,t,c:1});
+  this.begin(id);
+  return id;
+ },
+ async join(id){
+  if(!Sig.on()) throw new Error(T("e_nofb"));
+  PID=PID||roomId(8);
+  const v=await Sig.get("/rooms/"+id);
+  if(!v||!v.meta) throw new Error(T("e_noroom"));
+  const t=Date.now();
+  // cas closes the check-then-act race the old seat count had
+  const seat=await Sig.cas("/rooms/"+id+"/seat",cur=>{
+   const m=cur||{};
+   const live=Object.keys(m).filter(k=>t-((m[k]||{}).hb||0)<SEAT_TTL);
+   if(live.length>=MAX_SEATS && !m[PID]) return m;
+   return Object.assign({},m,{[PID]:{n:CFG.name,j:t,hb:t,w:0}});
+  });
+  if(!seat||!seat[PID]) throw new Error(T("e_roomfull"));
+  await Sig.patch("/lobby/"+id,{t,c:Object.keys(seat).length});
+  this.begin(id);
+ },
+ begin(id){
+  this.id=id; this.on=true;
+  this.st=RoomState.make(PID); this.st.id=id;
+  this.chat=[]; this.seen=new Set(); this.gseq=0; this.lastGo=0; this.starting=0;
+  this.gtag=Date.now().toString(36);
+  this.sub=Sig.stream(this.path(),ev=>this.onEvent(ev),()=>UI.streamDead());
+  this.openChat(id);
+  this.hbTimer=setInterval(()=>this.beat(),HB_MS);
+ },
+ onEvent(ev){
+  if(!this.on) return;
+  RoomState.apply(this.st,ev);
+  const v=this.view();
+  if(!v.seats.some(s=>s.pid===PID)){ UI.roomGone(); return; }
+  this.onRound(v);
+  UI.renderRoom();
+ },
+ async setReady(v){ if(this.on) await Sig.patch(this.mine(),{rdy:!!v}); },
+ async setSpectating(v){ if(this.on) await Sig.patch(this.mine(),{spec:!!v, rdy:false}); },
+ async setRule(r){ if(this.isHost()) await Sig.patch(this.path()+"/meta",{r:r==="score"?"score":"attack"}); },
+ async publishBoard(b){ if(this.on) await Sig.patch(this.path()+"/live/"+PID,b); },
+ async publishDeath(ms){ if(this.on) await Sig.patch(this.path()+"/live/"+PID,{o:1,ms:ms|0}); },
+ async sendAttack(pid,n){ if(this.on) await Sig.put(this.path()+"/gb/"+pid+"/"+PID+"_"+this.gtag+"_"+(++this.gseq),n|0); },
+ async bumpWin(){ return this.on ? Sig.cas(this.mine()+"/w",v=>(v|0)+1) : 0; },
+ // idempotent by message id: the old code applied before its delete landed
+ takeGarbage(g){
+  // only a live well consumes a key. marking it seen and deleting it while G
+  // was null, finished or spectating dropped the lines with nowhere to put
+  // them; left in the tree, the next stream event delivers them instead
+  if(!(G && !G.over && G.mode==="versus" && !G.spectating && !G.stranded)) return;
+  for(const k of Object.keys(g||{})){
+   if(this.seen.has(k)) continue;
+   this.seen.add(k);
+   const n=Math.max(0,Math.min(COLS*2,g[k]|0));
+   if(n>0) G.queueGarbage(n);
+   if(this.on) Sig.del(this.path()+"/gb/"+PID+"/"+k).catch(()=>{});
+  }
+ },
+ async callStart(){
+  if(!this.isHost()) return;
+  const roster={};
+  for(const s of this.view().seats) if(!s.spec && s.fresh) roster[s.pid]=s.j;
+  if(Object.keys(roster).length<2) return;
+  this.starting=now();
+  // wiped here, by the one writer, and before the go event that starts the
+  // round: clearing /live from each client after go raced the new boards, and
+  // left stale o:1 flags that read as a last man standing the instant a round
+  // began. undelivered attacks from the finished round go with them
+  await Sig.del(this.path()+"/live");
+  await Sig.del(this.path()+"/gb");
+  await Sig.put(this.path()+"/go",{s:((Math.random()*0xffffffff)>>>0)||1, r:NET_RULE, at:Date.now(), roster});
+ },
+ onRound(v){
+  if(!this.isHost() && !this.busy()) NET_RULE=v.rule;
+  if(v.go && v.go.at && v.go.at!==this.lastGo){
+   this.lastGo=v.go.at;
+   NET_SEED=v.go.s>>>0;
+   NET_RULE=v.go.r==="score"?"score":"attack";
+   startMatch();
+   // after the call, not before: startGame() used to zero this the moment it
+   // was set, so a spectating host (whose G is over on arrival) walked straight
+   // back into maybeStart() and fired go again on the next event
+   this.starting=now();
+  }
+  // after the go block, so the well this round just created can take them
+  const g=((this.st.tree||{}).gb||{})[PID];
+  if(g) this.takeGarbage(g);
+  this.syncFoes(v);
+  if(this.isHost()) this.maybeStart(v);
+ },
+ // the room stream is the only source of opponent wells; nothing called
+ // mirrorFoes, so every versus board beside your own stayed empty all match
+ syncFoes(v){
+  if(!v.roster) return;
+  const live=v.live||{};
+  mirrorFoes(v.seats
+   .filter(s=>s.pid!==PID && RoomState.inRound(v,s.pid))
+   .map(s=>({pid:s.pid, n:s.n, d:s.d, w:s.w, ms:s.ms, b:live[s.pid]||null})));
+ },
+ maybeStart(v){
+  if(G && !G.over) return;
+  if(this.busy()) return;
+  const p=v.seats.filter(s=>!s.spec && s.fresh);
+  if(p.length<2||!p.every(s=>s.rdy)) return;
+  this.callStart().catch(()=>{});
+ },
+ // chat streams on its own path, so the cq marker and its ordering hazard are gone
+ openChat(id){
+  this.chatSub=Sig.stream("/chat/"+id,ev=>{
+   if(ev.path==="/") this.chat=this.foldChat(ev.data||{});
+   else{
+    const key=ev.path.slice(1);
+    const m=this.chatMap();
+    if(ev.data===null) delete m[key]; else m[key]=ev.data;
+    this.chat=this.foldChat(m);
+   }
+   UI.renderChat();
+  });
+ },
+ chatMap(){ const o={}; for(const m of this.chat) o[m.key]={n:m.n,m:m.m}; return o; },
+ foldChat(c){
+  return Object.keys(c).sort((a,b)=>parseInt(a,10)-parseInt(b,10)||(a<b?-1:1))
+   .slice(-CHAT_KEEP)
+   .map(k=>({key:k, n:String((c[k]||{}).n||"").slice(0,12), m:String((c[k]||{}).m||"").slice(0,120)}));
+ },
+ async say(text){
+  if(!this.on) return;
+  const t=String(text).slice(0,120);
+  if(!t.trim()) return;
+  await Sig.put("/chat/"+this.id+"/"+(Date.now()+"-"+PID),{n:CFG.name,m:t});
+ },
+ async beat(){
+  if(!this.on) return;
+  const t=Date.now();
+  try{
+   await Sig.patch(this.mine(),{hb:t});
+   const n=this.view().seats.filter(s=>s.fresh).length||1;
+   await Sig.patch("/lobby/"+this.id,{t,c:n});   // any occupant refreshes it, not only the host
+  }catch(e){}
+ },
+ async leave(){
+  if(!this.on && !this.id) return;
+  const id=this.id;
+  this.on=false;
+  clearInterval(this.hbTimer); this.hbTimer=null;
+  try{ this.sub&&this.sub.close(); }catch(e){}
+  try{ this.chatSub&&this.chatSub.close(); }catch(e){}
+  this.sub=this.chatSub=null; this.id=null; this.st=null; this.chat=[];
+  // awaited, and capped so a dead network cannot trap the player on this screen
+  const work=(async()=>{
+   await Sig.del("/rooms/"+id+"/seat/"+PID);
+   await Sig.del("/rooms/"+id+"/live/"+PID);
+   await Sig.del("/rooms/"+id+"/gb/"+PID);   // else it is waiting to bury you on your next visit
+   // re-read rather than trust the last snapshot: two players can leave at once
+   const left=await Sig.get("/rooms/"+id+"/seat");
+   const t=Date.now();
+   const live=Object.keys(left||{}).filter(k=>t-((left[k]||{}).hb||0)<SEAT_TTL);
+   if(live.length){ await Sig.patch("/lobby/"+id,{t,c:live.length}); return; }
+   await Sig.del("/rooms/"+id);
+   await Sig.del("/lobby/"+id);
+   await Sig.del("/chat/"+id);
+  })();
+  await Promise.race([work.catch(()=>{}), Sig.sleep(LEAVE_TIMEOUT_MS)]);
+ }
+};
+// rendering only; markup and class names are unchanged, so the CSS still applies
+const RoomView = {
+ render(v){
+  const host=$("#seatlist");
+  if(!host) return;
+  const inRoom=!!v;
+  // stale seats kept a crashed player on the list forever, and counted toward
+  // the two that enable Ready, while the host only ever starts on fresh ones
+  const players=inRoom ? v.seats.filter(s=>s.fresh||s.pid===PID).map(s=>({
+    pid:s.pid, n:s.n, rdy:s.rdy, spec:s.spec, w:s.w,
+    battling:!!v.roster && !s.spec && !s.d && RoomState.inRound(v,s.pid)
+   }))
+   :(Net.ready()?[{pid:PID,n:CFG.name,rdy:READY_P2P.me,w:WINS_P2P.me,battling:false},
+           {pid:"peer",n:Net.peerName||T("opponent"),rdy:READY_P2P.peer,w:WINS_P2P.peer,battling:false}]:[]);
+  const active=players.filter(p=>!p.spec);
+  const me=players.find(p=>p.pid===PID)||null;
+  // this runs on every stream event now, so skip the rebuild when nothing moved
+  const sig=CFG.lang+":"+JSON.stringify(players);
+  if(sig!==this._sig){
+   this._sig=sig;
+   const rows=players.map(p=>{
+    const you=p.pid===PID;
+    return '<div class="seat-row'+(p.rdy?" ready":"")+(p.battling?" battling":"")+(p.spec?" spectating":"")+(you?" mine":"")+'" data-pid="'+esc(p.pid)+'">'+
+     '<div class="nm">'+esc(p.n)+(you?" · "+esc(T("room_you")):"")+(p.spec?" · "+esc(T("room_spectating")):"")+(p.battling?" · "+esc(T("room_battling")):"")+'</div>'+
+     '<div class="w">'+(p.w|0)+'<small>'+esc(T("room_wins"))+'</small></div></div>';
+   });
+   // an empty bordered box says nothing; name the state instead
+   host.innerHTML=rows.length?rows.join(""):'<p class="empty">'+esc(T("room_empty"))+'</p>';
+  }
+  const mySpec=!!(me&&me.spec);
+  const btn=$("#b-ready");
+  if(btn){ btn.textContent=T(mySpec?"room_ready":(me&&me.rdy?"room_unready":"room_ready")); btn.classList.toggle("ready",!!(me&&me.rdy)); btn.disabled=active.length<2||mySpec; }
+  const specBtn=$("#b-spectate");
+  if(specBtn){
+   const othersInMatch=players.some(p=>p.pid!==PID && p.battling);
+   specBtn.hidden=!inRoom||(!mySpec&&!othersInMatch);   // only offered once a match is live (still shown to an active spectator so they can opt back out)
+   specBtn.textContent=T(mySpec?"room_unspectate":"room_spectate");
+   specBtn.classList.toggle("on",mySpec);
+  }
+  const hint=$("#room-hint");
+  if(hint && hint.dataset.orig===undefined) hint.textContent = active.length<2 ? T("room_alone") : T("room_hint_n",{n:active.length});
+  UI.paintRule();
+  UI.renderChat();
+ }
+};
+const ROOM_ALPHA="ACDEFGHJKLMNPQRTUVWXYZ2346789";
+const roomId = n => Array.from({length:n||6},()=>ROOM_ALPHA[rnd(ROOM_ALPHA.length)]).join("");
+// run-length encoded: 200 cells become about 60
+const Grid = {
+ enc(s){
+  let out="";
+  for(let i=0;i<s.length;){
+   let j=i;
+   while(j<s.length && s[j]===s[i]) j++;
+   out += s[i] + (j-i>1 ? j-i : "");
+   i=j;
+  }
+  return out;
+ },
+ dec(s){
+  if(!/\d/.test(s)) return s;
+  let out="";
+  for(let i=0;i<s.length;){
+   const c=s[i++];
+   let n="";
+   while(i<s.length && s[i]>="0" && s[i]<="9") n+=s[i++];
+   out += c.repeat(n?+n:1);
+  }
+  return out;
+ }
+};
+const ROOM_MS=220, CHAT_KEEP=40, MAX_SEATS=4;
+let PID="";
+const Net = {
+ pc:null, dc:null, role:null, peerName:"", state:"idle",
+ stats:{host:0,srflx:0,ice:"new",conn:"new"},
+ watchdog:null, offerCode:"", mode:"p2p", lastB:"",
+ ready(){ return RoomClient.on || !!(this.dc && this.dc.readyState==="open"); },
+ setState(s){ this.state=s; UI.netStatus(); },
+ resetStats(){ this.stats={host:0,srflx:0,ice:"new",conn:"new"}; UI.diag(); },
+ reset(){
+  this.clearWatchdog();
+  this.mode="p2p";
+  try{ this.dc&&this.dc.close(); }catch(e){}
+  try{ this.pc&&this.pc.close(); }catch(e){}
+  this.pc=this.dc=null; this.role=null; this.peerName=""; this.lastB="";
+  this.resetStats();
+  this.setState("idle");
+ },
+ armWatchdog(ms,soft){
+  this.clearWatchdog();
+  this.watchdog=setTimeout(()=>{
+   this.watchdog=null;
+   if(this.state==="connected") return;
+   if(soft){ UI.stillWaiting(); this.armWatchdog(ms,true); }
+   else UI.connectFailed("timeout");
+  },ms);
+ },
+ clearWatchdog(){ if(this.watchdog){ clearTimeout(this.watchdog); this.watchdog=null; } },
+ makePC(){
+  const pc=new RTCPeerConnection(rtcConfig());
+  this.resetStats();
+  pc.onicecandidate=e=>{
+   const c=e.candidate && e.candidate.candidate;
+   if(!c) return;
+   const m=/ typ (host|srflx|prflx)/.exec(c);
+   if(m && this.stats[m[1]]!==undefined) this.stats[m[1]]++;
+   UI.diag();
+  };
+  pc.onicegatheringstatechange=()=>{ this.stats.ice=pc.iceGatheringState; UI.diag(); };
+  pc.oniceconnectionstatechange=()=>{
+   this.stats.conn=pc.iceConnectionState; UI.diag();
+   if(pc.iceConnectionState==="failed"){
+    if(this.state==="connected") UI.peerLost(); else UI.connectFailed("ice");
+   }else if(pc.iceConnectionState==="disconnected"||pc.iceConnectionState==="closed"){
+    if(this.state==="connected") UI.peerLost();
+   }
+  };
+  pc.onconnectionstatechange=()=>{
+   if(pc.connectionState==="failed" && this.state!=="connected") UI.connectFailed("ice");
+  };
+  this.pc=pc;
+  return pc;
+ },
+ bindChannel(dc){
+  this.dc=dc;
+  dc.onopen=()=>{
+   this.clearWatchdog();
+   this.setState("connected");
+   this.send({t:"hi",name:CFG.name,r:NET_RULE});
+  };
+  dc.onclose=()=>{ if(this.state==="connected") UI.peerLost(); };
+  dc.onmessage=e=>{
+   let m; try{ m=JSON.parse(e.data); }catch(_){ return; }
+   this.onMsg(m);
+  };
+ },
+ send(obj){
+  if(!this.ready()) return;
+  if(obj.t==="b"){
+   const b={d:Grid.enc(obj.d)};
+   if(G && G.clock && obj.p) b.p=obj.p|0;
+   if(obj.o) b.o=1;
+   const key=JSON.stringify(b);
+   if(key===this.lastB) return;
+   this.lastB=key;
+   if(RoomClient.on){ RoomClient.publishBoard(b).catch(()=>{}); return; }
+   obj=Object.assign({t:"b"},b);
+  }
+  if(RoomClient.on) return;
+  try{ this.dc.send(JSON.stringify(obj)); }catch(e){}
+ },
+ onMsg(m){
+  switch(m.t){
+   case "hi":
+    this.peerName=String(m.name||T("opponent")).slice(0,12);
+    if(this.role==="guest") NET_RULE = m.r==="score" ? "score" : "attack";
+    if(FOES[0]) FOES[0].name=this.peerName;
+    else FOES=[{pid:"peer",name:this.peerName,board:null,dead:false,wins:0}];
+    UI.peerJoined();
+    break;
+   case "b":
+    if(!FOES[0]) FOES=[{pid:"peer",name:this.peerName||T("opponent"),board:null,dead:false,wins:0}];
+    FOES[0].board=fitBoard(Grid.dec(m.d)); FOES[0].score=m.p|0; FOES[0].dead=!!m.o;
+    break;
+   case "a":
+    if(G && !G.over && G.mode==="versus"){
+     G.queueGarbage(m.n|0);
+    }
+    break;
+   case "d":
+    if(FOES[0]){ FOES[0].dead=true; FOES[0].ms=m.ms|0; }
+    if(G && !G.over && G.attacks){ G.resolved=true; G.win(); }
+    break;
+   case "m":
+    if(this.role==="guest"){ NET_RULE = m.r==="score" ? "score" : "attack"; UI.renderRoom(); }
+    break;
+   case "r": UI.peerReady(!!m.v); break;
+  }
+ },
+ async createOffer(){
+  this.reset();
+  this.role="host";
+  this.setState("offering");
+  NET_RULE="attack";
+  NET_SEED=((Math.random()*0xffffffff)>>>0)||1;
+  const pc=this.makePC();
+  this.bindChannel(pc.createDataChannel("tetris",{ordered:true}));
+  await pc.setLocalDescription(await pc.createOffer());
+  await waitIceGatheringComplete(pc);
+  this.offerCode=encodeBlob({k:"o",d:this.pc.localDescription,n:CFG.name,s:NET_SEED});
+  return this.offerCode;
+ },
+ async createAnswer(offerCode){
+  let data;
+  try{ data=decodeBlob(offerCode); }catch(e){ throw new Error(T("e_badcode")); }
+  if(!data || data.k!=="o" || !data.d) throw new Error(T("e_nothost"));
+  this.reset();
+  this.role="guest";
+  this.setState("answering");
+  NET_SEED=data.s>>>0;
+  this.peerName=String(data.n||T("opponent")).slice(0,12);
+  const pc=this.makePC();
+  pc.ondatachannel=e=>this.bindChannel(e.channel);
+  await pc.setRemoteDescription(data.d);
+  await pc.setLocalDescription(await pc.createAnswer());
+  await waitIceGatheringComplete(pc);
+  this.armWatchdog(60000,true);
+  return encodeBlob({k:"a",d:this.pc.localDescription,n:CFG.name});
+ },
+ async acceptAnswer(answerCode){
+  let data;
+  try{ data=decodeBlob(answerCode); }catch(e){ throw new Error(T("e_badcode")); }
+  if(!data || data.k!=="a" || !data.d) throw new Error(T("e_notguest"));
+  if(!this.pc) throw new Error(T("e_first"));
+  if(data.n) this.peerName=String(data.n).slice(0,12);
+  await this.pc.setRemoteDescription(data.d);
+  this.setState("linking");
+  this.armWatchdog(45000);
+ },
+};
+const ESC={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+const esc = s => String(s).replace(/[&<>"']/g,c=>ESC[c]);
+const PARENT = {
+ "#v-play":  "#v-home",
+ "#v-set":   "#v-home",
+ "#v-speed": "#v-play",
+ "#v-records":"#v-play",
+ "#v-lobby": "#v-play",
+ "#v-host":  "#v-lobby",
+ "#v-join":  "#v-lobby"
+};
+const NET_SCREENS = {"#v-host":1,"#v-join":1};
+const EXIT_MS=100;
+// a deliberate beat between screens, matched by .veil's transition
+function afterScreen(fn){ setTimeout(fn,EXIT_MS); }
+const BOARD_FADE_MS=320, RESULT_DELAY_MS=1000;
+let goTimer=0;
+// held so startGame() can cancel it, and gated on the well it was armed for:
+// otherwise quitting and restarting inside the fade blanked the NEW run
+let boardDrop=0;
+function dropBoard(){
+ if(G){ G.resolved=true; G.pending=false; }
+ const doomed=G;
+ clearTimeout(boardDrop);
+ boardDrop=setTimeout(()=>{ boardDrop=0; if(G&&G!==doomed) return; G=null; FOES=[]; render(null); },BOARD_FADE_MS);
+}
+const UI = {
+ cur:"#v-home",
+ show(id,inner){
+  const from=this.cur;
+  if(id && from && id!==from){
+   this.leaving();
+   this.board(id);
+   this.show(null,true);
+   afterScreen(()=>this.show(id,false));
+   return;
+  }
+  if(!inner) this.board(id);
+  $$(".veil").forEach(v=>{
+   v.classList.remove("on");
+  });
+  if(id){
+   const el=$(id);
+   const c=el.querySelector(".card");
+   if(c) this._flush=getComputedStyle(c).transform;
+   el.classList.add("on");
+   this.cur=id;
+   // the room list is only worth polling while it is the screen being looked
+   // at; leaving() stops it again on the way out
+   if(id==="#v-lobby" && !this._rooms) this.doOnline();
+  }else this.cur=null;
+  if(!inner) document.body.classList.toggle("playing",!!G && !this.cur);
+ },
+ // the one place the board's visibility is decided
+ board(id){ $("#screen").classList.toggle("live", !!G && !id); },
+ closeAll(){ this.show(null); },
+ back(from){
+  const src=from||this.cur;
+  const to=PARENT[src]||"#v-home";
+  if(NET_SCREENS[src]) Net.reset();
+  this.show(to);
+ },
+ // a half-finished rebind, and the lobby poll that otherwise ran forever
+ leaving(){ cancelBind(); clearInterval(this._rooms); this._rooms=0; },
+ togglePause(){
+  if(!G || G.over) return;
+  if(this.pauseOpen) this.closePauseMenu();
+  else this.openPauseMenu();
+ },
+ openPauseMenu(){
+  if(!G || G.over || this.pauseOpen) return;
+  if(G.mode!=="versus") G.paused=true;
+  Input.reset();
+  this.pauseOpen=true;
+  $("#pause-menu").classList.toggle("versus",G.mode==="versus");
+  $("#pause-menu").classList.add("on");
+ },
+ closePauseMenu(){
+  if(!this.pauseOpen) return;
+  this.pauseOpen=false;
+  $("#pause-menu").classList.remove("on");
+  if(G && !G.over) G.paused=false;
+  Input.reset();
+ },
+ restartFromPause(){
+  if(!G) return;
+  const mode=G.mode;
+  this.pauseOpen=false;
+  $("#pause-menu").classList.remove("on");
+  startGame(mode);
+ },
+ quitToMenu(){
+  this.pauseOpen=false;
+  $("#pause-menu").classList.remove("on");
+  if(G && G.mode==="versus"){ this.leaveRoom(); return; }
+  this.show("#v-home");
+  dropBoard();
+ },
+ showGameOver(beat){
+  const g=G, secs=Math.max(0,((g.endedAt||now())-g.startedAt)/1000);
+  const time=String(Math.floor(secs/60)).padStart(2,"0")+":"+(secs%60).toFixed(2).padStart(5,"0");
+  $("#go-title").textContent = g.won ? T("g_clear") : T("g_over");
+  $("#go-best").hidden = !beat || g.mode==="versus";
+  const rows = g.mode==="sprint"
+   ? [[T("g_time"),time],[T("g_lines"),g.lines]]
+   : g.mode==="speed"
+   ? [[T("g_lines"),g.lines],[T("g_level"),g.level],[T("g_time"),time]]
+   : g.mode==="versus"
+   ? (g.attacks ? [[T("g_sent"),g.attackSent],[T("g_lines"),g.lines],[T("g_time"),time]]
+          : [[T("g_score"),g.score.toLocaleString()],[T("g_lines"),g.lines],[T("g_time"),time]])
+   : [[T("g_score"),g.score.toLocaleString()],[T("g_lines"),g.lines],[T("g_level"),g.level],[T("g_time"),time]];
+  $("#go-stats").innerHTML = rows.map(([k,v])=>
+   '<div class="rec"><span class="k">'+esc(k)+'</span><span class="v">'+esc(String(v))+'</span></div>').join("");
+  const menuKey = g.mode==="versus" ? "go_room" : "go_menu";
+  const menuBtn=$("#go-menu");
+  menuBtn.dataset.i18n=menuKey; menuBtn.textContent=T(menuKey);
+  // the card lands a beat after the run ends, so the last move is readable;
+  // gated on the well it was armed for, like dropBoard's own timer
+  this._goMode=g.mode;
+  clearTimeout(goTimer);
+  goTimer=setTimeout(()=>{
+   goTimer=0;
+   if(G!==g) return;
+   document.body.classList.add("over");
+   $("#game-over").classList.add("on");
+   dropBoard();                 // clear the well behind the card, not just over it
+  },RESULT_DELAY_MS);
+ },
+ hideGameOver(){ clearTimeout(goTimer); goTimer=0; document.body.classList.remove("over"); $("#game-over").classList.remove("on"); },
+ backToMenuFromGameOver(){
+  this.hideGameOver();
+  // G is already gone by now: the card tore the board down behind itself
+  if(this._goMode==="versus"){ this.showRoom(); return; }
+  this.quitToMenu();
+ },
+ showRecords(){ this.renderRecords(); this.show("#v-records"); },
+ renderRecords(){
+  const el=$("#rec-list");
+  if(!el) return;
+  const dash=T("rec_empty");
+  const rows=[
+   [T("rec_marathon"), REC.marathon>0 ? REC.marathon.toLocaleString() : dash],
+   [T("rec_sprint"),   REC.sprint>0   ? REC.sprint.toFixed(2)+"s"     : dash],
+   [T("rec_wins"),     REC.wins>0     ? String(REC.wins)              : dash],
+   ...["easy","normal","hard"].map(d=>
+    [T("rec_speed",{d:T("sp_"+d)}), REC.speed[d]>0 ? String(REC.speed[d]) : dash])
+  ];
+  el.innerHTML=rows.map(([k,v])=>
+   '<div class="rec'+(v===dash?" none":"")+'"><span class="k">'+esc(k)+
+   '</span><span class="v">'+esc(v)+'</span></div>').join("");
+ },
+ async doOnline(){ this.refreshRooms(); clearInterval(this._rooms); this._rooms=setInterval(()=>{ if(this.cur==="#v-lobby") this.refreshRooms(); },3000); },
+ async refreshRooms(){
+  const list=$("#on-list");
+  if(!list) return;
+  try{
+   const rooms=await RoomClient.listRooms();
+   list.classList.toggle("has-rooms",!!rooms.length);
+   if(!rooms.length){ list.innerHTML='<p class="diag" id="on-none">'+esc(T("on_none"))+'</p>'; return; }
+   list.innerHTML=rooms.map(r=>
+    '<button class="room-row" data-room="'+esc(r.id)+'"><span class="nm">'+esc(r.name||T("opponent"))+
+    '</span><span class="sub">'+esc(T("on_seats",{n:r.count||1,max:MAX_SEATS}))+'</span></button>').join("");
+   list.querySelectorAll("[data-room]").forEach(b=>b.onclick=()=>this.doJoinRoom(b.dataset.room));
+  }catch(e){ this.err("#srv-hint",e.message,true); }
+ },
+ async doMakeRoom(){
+  Net.reset();
+  clearInterval(this._rooms);
+  // mode flips only once the room is actually up: a failed open used to
+  // leave it on "room" and silently swallow every later P2P send
+  try{ await RoomClient.create(); Net.mode="room"; Net.role="host"; Net.setState("connected"); this.showRoom(); }
+  catch(e){ this.err("#srv-hint",e.message,true); }
+ },
+ async doJoinRoom(id){
+  Net.reset();
+  try{ await RoomClient.join(id); Net.mode="room"; Net.role="guest"; Net.setState("connected"); this.showRoom(); }
+  catch(e){ this.err("#srv-hint",e.message,true); this.refreshRooms(); }
+ },
+ async doHost(){
+  this.show("#v-host");
+  $("#h-out").value=""; $("#h-in").value="";
+  $("#hs").textContent=T("st_preparing"); $("#hs").className="wait";
+  try{ await Net.createOffer(); }
+  catch(e){ this.err("#h-hint",T("e_make",{m:e.message}),true); }
+  $("#h-out").value=Net.offerCode||"";
+  this.netStatus();
+ },
+ async doAnswer(){
+  const input=$("#j-in").value.trim();
+  if(!input){ this.err("#j-hint",T("e_pastehost")); return; }
+  $("#j-out").value=T("working");
+  try{ $("#j-out").value=await Net.createAnswer(input); this.ok("#j-hint",T("ok_sendback")); }
+  catch(e){ $("#j-out").value=""; this.err("#j-hint",e.message); }
+  this.netStatus();
+ },
+ async doAccept(){
+  const input=$("#h-in").value.trim();
+  if(!input){ this.err("#h-hint",T("e_pastereply")); return; }
+  try{ await Net.acceptAnswer(input); this.ok("#h-hint",T("ok_linking")); }
+  catch(e){ this.err("#h-hint",e.message); }
+  this.netStatus();
+ },
+ async copy(sel,hintSel){
+  const t=$(sel);
+  if(!t.value) return;
+  let ok=false;
+  try{ if(navigator.clipboard && window.isSecureContext){ await navigator.clipboard.writeText(t.value); ok=true; } }catch(e){}
+  if(!ok){
+   try{
+    const tmp=document.createElement("textarea");
+    tmp.value=t.value; tmp.setAttribute("readonly","");
+    tmp.style.cssText="position:fixed;top:0;left:0;opacity:0;font-size:16px";
+    document.body.appendChild(tmp);
+    tmp.contentEditable="true"; tmp.focus(); tmp.setSelectionRange(0,t.value.length);
+    ok=document.execCommand("copy");
+    document.body.removeChild(tmp);
+   }catch(e){ ok=false; }
+  }
+  if(hintSel){
+   if(ok) this.ok(hintSel,T("copied"));
+   else{ this.err(hintSel,T("copyfail")); t.focus(); t.setSelectionRange(0,t.value.length); }
+  }
+ },
+ netStatus(){
+  const label=Net.mode==="relay"&&Net.state==="connected" ? T("st_relayed") : T({
+   idle:"st_idle", offering:"st_offering", answering:"st_answering",
+   linking:"st_linking", connected:"st_connected", failed:"st_failed"
+  }[Net.state]||"st_idle");
+  const hs=$("#hs"), js=$("#js");
+  const cls=Net.state==="connected"?"":Net.state==="failed"?"bad":"wait";
+  if(hs){ if(Net.role==="host"){ hs.textContent=label; hs.className=cls; } else if(Net.state==="idle"){ hs.textContent=T("st_preparing"); } }
+  if(js){ if(Net.role==="guest"){ js.textContent=label; js.className=cls; } else if(Net.state==="idle"){ js.textContent=T("st_waiting"); } }
+ },
+ diag(){
+  const st=Net.stats;
+  const el=Net.role==="guest"?$("#j-diag"):$("#h-diag");
+  if(!el||Net.mode==="relay") return;
+  el.textContent=[T("d_local")+" "+st.host, T("d_public")+" "+st.srflx, T("d_link")+" "+st.conn.toUpperCase()].join(" · ");
+ },
+ stillWaiting(){
+  const el=$(Net.role==="guest"?"#j-hint":"#h-hint");
+  if(el){ if(el.dataset.orig===undefined) el.dataset.orig=el.innerHTML; el.textContent=T("e_waiting"); }
+  this.diag();
+ },
+ connectFailed(why){
+  Net.clearWatchdog();
+  const st=Net.stats;
+  let msg;
+  if(why==="relay") msg=T("e_relay");
+  else if(st.srflx===0) msg=T("e_nostun");
+  else if(why==="ice") msg=T("e_direct");
+  else msg=T("e_generic");
+  if(why==="timeout") msg=T("e_timeout")+" "+msg;
+  this.err(Net.role==="guest"?"#j-hint":"#h-hint",msg,true);
+  Net.setState("failed");
+  this.diag();
+ },
+ peerJoined(){ if(G && G.mode==="versus" && !G.over) return; ; this.showRoom(); },
+ showRoom(){ this.renderRoom(); this.show("#v-room"); },
+ isHost(){ return RoomClient.on ? RoomClient.isHost() : Net.role==="host"; },
+ setRule(r){
+  if(!this.isHost() || NET_RULE===r) return;
+  NET_RULE=r;
+  if(RoomClient.on) RoomClient.setRule(r).catch(()=>{}); else Net.send({t:"m",r});
+  this.paintRule();
+ },
+ paintRule(){
+  const host=this.isHost(), live=!!(G && G.mode==="versus" && !G.over);
+  $$(".rule").forEach(b=>{ b.classList.toggle("on",b.dataset.rule===NET_RULE); b.disabled=!host||live; });
+  const h=$("#rule-hint");
+  if(h) h.textContent=T(NET_RULE==="score"?"rule_score_s":"rule_attack_s")+(host?"":" "+T("rule_locked"));
+ },
+ setReady(v){
+  // no local echo: the stream is the single source of truth for seat state
+  if(RoomClient.on){ RoomClient.setReady(v).catch(()=>{}); return; }
+  if(!Net.ready()) return;
+  READY_P2P.me=v; Net.send({t:"r",v});
+  this.renderRoom();
+  if(READY_P2P.me&&READY_P2P.peer) startMatch();
+ },
+ peerReady(v){ READY_P2P.peer=v; this.renderRoom(); if(READY_P2P.me&&READY_P2P.peer) startMatch(); },
+ setSpectating(v){
+  if(RoomClient.on) RoomClient.setSpectating(v).catch(()=>{});
+ },
+ renderRoom(){ RoomView.render(RoomClient.on?RoomClient.view():null); },
+ renderChat(){
+  const log=RoomClient.on?RoomClient.chat:[];
+  const el=$("#chat-log");
+  // the language belongs in the signature: without it the empty-chat line
+  // kept its old wording after a language switch
+  const sig=CFG.lang+":"+log.length+":"+(log.length?log[log.length-1].key:"");
+  if(!el || sig===this._chatLogSig) return;
+  this._chatLogSig=sig;
+  const said=m=>{ const i=String(m.key||"").indexOf("-"); return i<0?"":m.key.slice(i+1); };
+  el.innerHTML = log.length ? log.map(m=>
+   '<div class="msg'+(said(m)===PID?" mine":"")+'"><div class="who">'+esc(m.n)+'</div><div class="txt">'+esc(m.m)+'</div></div>'
+  ).join("") : '<p class="empty">'+esc(T("chat_empty"))+'</p>';
+  el.scrollTop=el.scrollHeight;
+ },
+ async leaveRoom(){
+  READY_P2P.me=READY_P2P.peer=false;
+  dropBoard();
+  // the deletes are awaited before the lobby is re-listed, or the room you
+  // just left is still in the list you land on
+  try{ await RoomClient.leave(); }catch(e){}
+  Net.reset();
+  this.show("#v-lobby");
+  this.doOnline();
+ },
+ strandedMatch(hintKey){
+  if(G && !G.over && G.mode==="versus"){ G.over=true; G.stranded=true; G.events.length=0; }
+  this.hideGameOver();
+  this.show("#v-lobby");
+  this.doOnline();
+  this.err("#lob-hint",T(hintKey),true);
+  dropBoard();
+ },
+ streamDead(){
+  if(!RoomClient.on) return;
+  RoomClient.leave().catch(()=>{}); Net.reset();
+  this.strandedMatch("e_streamdead");
+ },
+ roomGone(){
+  if(!RoomClient.on) return;
+  RoomClient.leave().catch(()=>{}); Net.reset();
+  this.strandedMatch("e_roomgone");
+ },
+ peerLost(){
+  Net.reset();
+  READY_P2P.me=READY_P2P.peer=false;
+  this.strandedMatch("e_peerleft");
+ },
+ matchPending(){},
+ tallied(won,tie,best){
+  // claim the run before scoring it: gameOver() firing later for the same
+  // well used to run noteRun a second time and double-count the win
+  this._goneFor=G;
+  const beat=noteRun(G,won,((G.endedAt||now())-G.startedAt)/1000);
+  if(RoomClient.on){ if(won) RoomClient.bumpWin().catch(()=>{}); }
+  else if(won) WINS_P2P.me++;
+  else if(!tie) WINS_P2P.peer++;
+  this.renderRoom();
+  this.showGameOver(beat);
+ },
+ gameOver(won){
+  if(this._goneFor===G) return;   // one card and one tally, however often the round is called
+  this._goneFor=G;
+  if(G.mode==="versus" && Net.mode!=="room"){ if(won) WINS_P2P.me++; else WINS_P2P.peer++; }
+  const beat=noteRun(G,won,((G.endedAt||now())-G.startedAt)/1000);
+  this.renderRoom();
+  this.showGameOver(beat);
+ },
+ openSettings(){ this.show("#v-set"); this.openTab(TAB); },
+ openTab(name){
+  TAB=name;
+  $$("#set-rail [data-tab]").forEach(b=>{ const on=b.dataset.tab===name; b.classList.toggle("on",on); b.setAttribute("aria-selected",on); });
+  $$("#v-set .panel").forEach(p=>p.classList.toggle("on",p.dataset.panel===name));
+  if(name==="controls"){ repaintSettings(); paintTouch(); bindRows("#keylist","keys"); bindRows("#padlist","pads"); paintPad(); }
+  if(name==="audio") repaintSettings();
+ },
+ err(sel,msg,stay){ this.flash(sel,msg,"#ff7b8a",stay); },
+ ok(sel,msg){ this.flash(sel,msg,"#4fe0a8"); },
+ flash(sel,msg,color,stay){
+  const el=$(sel); if(!el) return;
+  if(el.dataset.orig===undefined) el.dataset.orig=el.innerHTML;
+  el.innerHTML='<b style="color:'+color+'">'+esc(msg)+'</b>';
+  clearTimeout(this["_t"+sel]);
+  if(stay) return;
+  this["_t"+sel]=setTimeout(()=>{ if(el.dataset.orig!==undefined) el.innerHTML=el.dataset.orig; },5000);
+ }
+};
+function splitSelect(splitId,itemSel,groupAttr){
+ const root=$(splitId);
+ root.querySelectorAll(itemSel).forEach(b=>b.addEventListener("click",()=>{
+  root.querySelectorAll(itemSel).forEach(o=>o.classList.toggle("on",o===b));
+  root.querySelectorAll(".panel-area>[data-panel]").forEach(p=>p.classList.toggle("on",p.dataset.panel===b.dataset[groupAttr]));
+  root.classList.add("panel-open");
+ }));
+ root.querySelector(".panel-back")?.addEventListener("click",()=>{ ; root.classList.remove("panel-open"); });
+}
+splitSelect("#lobby-split","[data-panel]","panel");
+function applyControlSide(){ document.body.classList.toggle("swap",!!CFG.swap); }
+applyControlSide();
+function applyTouchMode(){
+ document.body.classList.toggle("swipe",CFG.touch==="swipe");
+ document.body.classList.toggle("notouch",CFG.touch==="off");
+ layout();
+}
+// standard-mapping d-pad and face buttons, for driving menus with a controller
+const MENU_PAD={12:"up",13:"down",14:"left",15:"right",0:"ok",1:"back"};
+const MENU_KEY={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",
+        Enter:"ok",NumpadEnter:"ok",Space:"ok",Escape:"back"};
+const MenuNav = {
+ // whichever layer is on top; null during gameplay, where keys drive the piece
+ root(){
+  if($("#game-over").classList.contains("on")) return $("#game-over");
+  if(UI.pauseOpen) return $("#pause-menu");
+  return UI.cur ? $(UI.cur) : null;
+ },
+ items(){
+  const r=this.root();
+  if(!r) return [];
+  return [...r.querySelectorAll(".mi,.room-row,.bindrow")]
+   .filter(el=>!el.disabled && el.offsetParent!==null && !el.hidden);
+ },
+ clear(){ $$(".mi.navfocus").forEach(el=>el.classList.remove("navfocus")); },
+ focus(el){
+  this.clear();
+  el.classList.add("navfocus");
+  try{ el.focus({preventScroll:false}); }catch(e){ el.focus(); }
+ },
+ move(d){
+  const it=this.items();
+  if(!it.length) return;
+  const at=it.indexOf(document.activeElement);
+  this.focus(it[at<0 ? (d>0?0:it.length-1) : (at+d+it.length)%it.length]);
+ },
+ // the split screens put the rail beside the panel, so sideways means the rail
+ side(d){
+  const r=this.root();
+  const split=r&&r.querySelector(".split");
+  if(!split) return this.move(d);
+  if(d<0){ split.classList.remove("panel-open"); this.move(0)||this.move(1); }
+  else{
+   const rail=[...split.querySelectorAll(".rail .mi")].find(el=>el.classList.contains("on"));
+   if(rail) rail.click();
+  }
+ },
+ act(a){
+  const r=this.root();
+  if(!r) return false;
+  if(a==="up") this.move(-1);
+  else if(a==="down") this.move(1);
+  else if(a==="left"||a==="right") this.side(a==="left"?-1:1);
+  else if(a==="ok"){
+   const el=document.activeElement;
+   if(el&&r.contains(el)&&el!==document.body) el.click(); else this.move(1);
+  }
+  else if(a==="back"){
+   if(UI.cur==="#v-room") UI.leaveRoom();          // the room has no back target
+   else if(r.id==="game-over") UI.backToMenuFromGameOver();
+   else if(UI.pauseOpen) UI.closePauseMenu();
+   else if(UI.cur&&UI.cur!=="#v-home") UI.back();
+   else return false;
+  }
+  return true;
+ }
+};
+addEventListener("keydown",e=>{
+ const t=e.target;
+ if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA")) return;   // chat and the URL box
+ if(BINDING) return;                                            // a rebind row is armed
+ const a=MENU_KEY[e.code];
+ if(!a||!MenuNav.root()) return;
+ // pressing a key IS the signal that this player is not on touch right now,
+ // so there is nothing to gate on here; a tap clears the ring again
+ LastDevice.note("key");
+ if(MenuNav.act(a)){ e.preventDefault(); e.stopPropagation(); }
+},true);
+document.addEventListener("pointerdown",e=>{
+ const el=e.target.closest && e.target.closest(".mi");
+ if(el) MenuNav.clear();
+ if(!el) return;
+ el.classList.add("lit");
+ clearTimeout(el._lit);
+ el._lit=setTimeout(()=>el.classList.remove("lit"),500);
+},true);
+$$("[data-go]").forEach(b=>b.onclick=()=>{
+ ; ;
+ const go=b.dataset.go;
+ if(go==="solo"||go==="sprint"){ UI.closeAll(); afterScreen(()=>startGame(go)); }
+ else if(go==="play") UI.show("#v-play");
+ else if(go==="versus"){ Net.reset(); UI.show("#v-lobby"); }
+ else if(go==="speed") UI.show("#v-speed");
+ else if(go==="records") UI.showRecords();
+ else if(go==="settings") UI.openSettings();
+ else if(go==="host") UI.doHost();
+ else if(go==="join") UI.show("#v-join");
+});
+$$("[data-back]").forEach(b=>b.onclick=()=>{ ; UI.back("#"+b.closest(".veil").id); });
+$$("[data-speed]").forEach(b=>b.onclick=()=>{
+ ; ;
+ CFG.speedDiff=b.dataset.speed; saveCfg();
+ UI.closeAll();
+ afterScreen(()=>startGame("speed"));
+});
+$("#b-mkroom").onclick=()=>UI.doMakeRoom();
+$("#h-copy").onclick=()=>UI.copy("#h-out","#h-hint");
+$("#h-connect").onclick=()=>UI.doAccept();
+$("#j-go").onclick=()=>UI.doAnswer();
+$("#j-copy").onclick=()=>UI.copy("#j-out","#j-hint");
+$("#h-in").addEventListener("paste",()=>setTimeout(()=>UI.doAccept(),60));
+$("#j-in").addEventListener("paste",()=>setTimeout(()=>UI.doAnswer(),60));
+const mySeat=()=>RoomClient.on?(RoomClient.view().seats.find(s=>s.pid===PID)||null):null;
+$("#b-ready").onclick=()=>{
+ const m=mySeat();
+ UI.setReady(!(RoomClient.on?!!(m&&m.rdy):READY_P2P.me));
+};
+$("#b-spectate").onclick=()=>{
+ const m=mySeat();
+ UI.setSpectating(!(m&&m.spec));
+};
+$$(".rule").forEach(b=>b.onclick=()=>{ ; UI.setRule(b.dataset.rule); });
+$("#b-leave").onclick=()=>{ ; UI.leaveRoom(); };
+$("#p-resume").onclick=()=>{ ; UI.closePauseMenu(); };
+$("#p-restart").onclick=()=>{ ; UI.restartFromPause(); };
+$("#p-quit").onclick=()=>{ ; UI.quitToMenu(); };
+$("#go-menu").onclick=()=>{ ; UI.backToMenuFromGameOver(); };
+$("#chatbar").addEventListener("submit",e=>{
+ e.preventDefault();
+ const el=$("#chat-in"), t=el.value;
+ if(!t.trim()||!RoomClient.on) return;      // keep the text if it cannot be sent
+ el.value="";
+ // a rejected chat write used to vanish without a trace, which hid a
+ // database rule that denied /chat for as long as it was wrong
+ RoomClient.say(t).catch(err=>{ el.value=t; UI.err("#room-hint",err.message,true); });
+});
+const rangePainters=[];
+function bindRange(id,key,label,fmt,after,scale){
+ const el=$(id), lb=$(label);
+ el.value=CFG[key]*(scale||1);
+ const paint=()=>lb.textContent=fmt(CFG[key]);
+ el.oninput=()=>{ CFG[key]=(+el.value)/(scale||1); paint(); saveCfg(); if(after) after(); };
+ rangePainters.push(()=>{ el.value=CFG[key]*(scale||1); paint(); });
+ paint();
+}
+bindRange("#s-das","das","#l-das",v=>T("u_ms",{v}));
+bindRange("#s-arr","arr","#l-arr",v=>v===0?T("u_instant"):T("u_ms",{v}));
+bindRange("#s-sdf","sdf","#l-sdf",v=>T("u_cps",{v}));
+bindRange("#s-btn","btnScale","#l-btn",v=>{
+ const {W,H}=viewportBox();
+ return Math.round(v*100)+"% · "+solve(W,H,v,CFG.btnY,CFG.btnX,CFG.touch!=="dpad").ctl+"px";
+},layout,100);
+bindRange("#s-bty","btnY","#l-bty",
+ v=>v===0?T("pv_centred"):(v>0?T("pv_up"):T("pv_down"))+" "+Math.abs(v)+"%",layout);
+bindRange("#s-btx","btnX","#l-btx",
+ v=>v===0?T("pv_default"):(v>0?T("pv_out"):T("pv_in"))+" "+Math.abs(v)+"%",layout);
+bindRange("#s-boardsize","boardScale","#l-boardsize",v=>Math.round(v*100)+"%",layout,100);
+$("#b-ctlreset").onclick=()=>{
+ CFG.btnScale=1; CFG.btnY=0; CFG.btnX=0; CFG.swap=false;
+ saveCfg();
+ $("#s-swap").classList.remove("on");
+ applyControlSide(); applyTouchMode();
+ repaintSettings();
+ layout();
+};
+function repaintSettings(){ rangePainters.forEach(p=>p()); }
+let TAB="general";
+$$("#set-rail [data-tab]").forEach(b=>b.onclick=()=>{
+ UI.openTab(b.dataset.tab);
+ $("#set-split").classList.add("panel-open");
+});
+$("#set-panelback").onclick=()=>{ ; $("#set-split").classList.remove("panel-open"); };
+const REDUCED = matchMedia("(prefers-reduced-motion:reduce)");
+const FOLD_MS = 300;
+const FOLDS = $$(".fold").map(d=>{
+ const body=d.querySelector(".foldbody");
+ const stop=()=>{
+  clearTimeout(d._ft);
+  if(d._end){ body.removeEventListener("transitionend",d._end); d._end=null; }
+ };
+ const settle=()=>{ stop(); body.style.height=""; d._busy=false; };
+ const onEnd=fn=>{
+  stop();
+  d._end=e=>{ if(e.target===body && e.propertyName==="height") fn(); };
+  body.addEventListener("transitionend",d._end);
+  d._ft=setTimeout(fn,FOLD_MS+120);
+ };
+ const open=()=>{
+  d.open=true;
+  if(REDUCED.matches){ settle(); return; }
+  d._busy=true;
+  const h=body.scrollHeight;
+  body.style.height="0px";
+  requestAnimationFrame(()=>{ body.style.height=h+"px"; });
+  onEnd(settle);
+ };
+ const close=()=>{
+  if(!d.open) return;
+  if(REDUCED.matches){ d.open=false; settle(); return; }
+  d._busy=true;
+  body.style.height=body.getBoundingClientRect().height+"px";
+  requestAnimationFrame(()=>{ body.style.height="0px"; });
+  onEnd(()=>{ d.open=false; settle(); });
+ };
+ return {el:d, open, close};
+});
+FOLDS.forEach(f=>{
+ f.el.querySelector("summary").addEventListener("click",e=>{
+  e.preventDefault();
+  if(f.el._busy) return;
+  if(f.el.open){ f.close(); return; }
+  FOLDS.forEach(o=>{ if(o!==f) o.close(); });
+  f.open();
+ });
+});
+function paintPad(){
+ $("#s-padon").classList.toggle("on",CFG.padOn);
+ $("#s-padon").setAttribute("aria-checked",CFG.padOn);
+ const pads=navigator.getGamepads?[...navigator.getGamepads()].filter(Boolean):[];
+ $("#pad-state").textContent=pads.length?pads[0].id.slice(0,32):T("pad_none");
+}
+const KEYFIX={ArrowLeft:"LEFT",ArrowRight:"RIGHT",ArrowUp:"UP",ArrowDown:"DOWN",
+       Space:"SPACE",Escape:"ESC",Enter:"ENTER",Tab:"TAB",Backspace:"BKSP"};
+const KEYNAME = c => KEYFIX[c] || String(c||"")
+ .replace(/^(Key|Digit)/,"").replace(/^Numpad/,"NUM ")
+ .replace(/^(Control|Shift|Alt|Meta)(Left|Right)$/,(_,m,side)=>({Control:"CTRL",Shift:"SHIFT",Alt:"ALT",Meta:"META"}[m]+" "+side[0]))
+ .toUpperCase();
+const PADNAME = i => ({0:"BOTTOM",1:"RIGHT",2:"LEFT",3:"TOP",4:"L",5:"R",6:"ZL",7:"ZR",
+            8:"SELECT",9:"START",12:"D-UP",13:"D-DOWN",14:"D-LEFT",15:"D-RIGHT"})[i]||("BTN "+i);
+// left armed, the next key pressed anywhere (mid-game included) was
+// swallowed and silently rebound
+function cancelBind(){
+ if(!BINDING && !Pad.watching) return;
+ BINDING=null; Pad.watching=null;
+ $$(".bindrow.binding").forEach(r=>r.classList.remove("binding"));
+ if($("#keylist")) bindRows("#keylist","keys");
+ if($("#padlist")) bindRows("#padlist","pads");
+}
+function bindRows(host,which){
+ const el=$(host);
+ if(!el) return;
+ const binds=which==="keys"?CFG.keys:CFG.pads;
+ const name=which==="keys"?KEYNAME:PADNAME;
+ el.innerHTML=ACTIONS.map(a=>
+  '<div class="sp bindrow" data-act="'+a+'"><span>'+esc(T("act_"+a))+'</span><b>'+
+  esc(binds[a].map(name).join(" · ")||T("act_none"))+'</b></div>').join("");
+ el.querySelectorAll("[data-act]").forEach(row=>row.onclick=()=>{
+  const act=row.dataset.act;
+  cancelBind();                      // only one row may be waiting at a time
+  row.classList.add("binding");
+  row.querySelector("b").textContent=T("act_press");
+  const done=code=>{
+   for(const a of ACTIONS) binds[a]=binds[a].filter(c=>c!==code);
+   binds[act]=[code];
+   saveCfg();
+   BINDING=null; Pad.watching=null;
+   bindRows(host,which);
+  };
+  if(which==="keys") BINDING=done; else Pad.watching=done;
+ });
+}
+$$(".tmode").forEach(b=>b.onclick=()=>{
+ CFG.touch=b.dataset.touch; CFG.touchSet=true; saveCfg();
+ applyTouchMode(); paintTouch();
+});
+function paintTouch(){
+ $$(".tmode").forEach(b=>b.classList.toggle("on",b.dataset.touch===CFG.touch));
+ const dpad=CFG.touch==="dpad", swipe=CFG.touch==="swipe";
+ $("#dpad-opts").hidden=!dpad;
+ $("#swipe-opts").hidden=!swipe;
+ $("#touch-hint").textContent=T(dpad?"set_dpad_s":swipe?"set_swipe_s":"set_off_s");
+}
+$("#s-padon").onclick=()=>{
+ CFG.padOn=!CFG.padOn; saveCfg(); ;
+ $("#s-padon").classList.toggle("on",CFG.padOn);
+ $("#s-padon").setAttribute("aria-checked",CFG.padOn);
+};
+addEventListener("gamepadconnected",()=>{ if(UI.cur==="#v-set") paintPad(); });
+addEventListener("gamepaddisconnected",()=>{ if(UI.cur==="#v-set") paintPad(); });
+bindRange("#s-swmove","swMove","#l-swmove",v=>T("u_swipepx",{v,px:Math.round(SWIPE_REF_PX*v/100)}));
+bindRange("#s-swdrop","swDrop","#l-swdrop",v=>T("u_swipepx",{v,px:Math.round(SWIPE_REF_PX*v/100)}));
+bindRange("#s-swflick","swFlick","#l-swflick",
+ v=>T("u_flick",{v:(v/100).toFixed(2)+" px/ms", n:T(v<=80?"f_gentle":v<=150?"f_normal":"f_firm")}));
+$("#b-swreset").onclick=()=>{
+ CFG.swMove=80; CFG.swDrop=70; CFG.swFlick=110;
+ saveCfg(); repaintSettings();
+};
+$("#b-keyreset").onclick=()=>{ ; CFG.keys=fillBinds(null,KEYS_DEFAULT); saveCfg(); bindRows("#keylist","keys"); };
+$("#b-padreset").onclick=()=>{ ; CFG.pads=fillBinds(null,PADS_DEFAULT); saveCfg(); bindRows("#padlist","pads"); };
+$$(".lang").forEach(b=>{
+ b.onclick=()=>{
+  if(CFG.lang===b.dataset.lang) return;
+  CFG.lang=b.dataset.lang; saveCfg(); ;
+  applyLang();
+ };
+});
+[["#s-bob","bob"],["#s-ghost","ghost"],
+ ["#s-grid","grid"],["#s-swap","swap"]].forEach(([id,key])=>{
+ const el=$(id);
+ el.classList.toggle("on",!!CFG[key]);
+ el.setAttribute("aria-checked",!!CFG[key]);
+ el.onclick=()=>{
+  CFG[key]=!CFG[key];
+  el.classList.toggle("on",CFG[key]);
+  el.setAttribute("aria-checked",CFG[key]);
+  saveCfg(); ;
+  if(key==="swap"){ applyControlSide(); layout(); }
+ };
+});
+$("#s-fb").value=CFG.fbUrl;
+$("#s-fb").oninput=e=>{ CFG.fbUrl=e.target.value.trim(); saveCfg(); };
+// upload problems are silent otherwise: the row simply would not change
+let tileNoteKey="";
+function tileNote(key){
+ if(key!==undefined) tileNoteKey=key;
+ const el=$("#tile-note"); if(!el) return;
+ el.textContent=tileNoteKey?T(tileNoteKey):"";
+ el.style.color=tileNoteKey?"#ff7b8a":"";
+}
+// the flat colour stays under the swatch so it still reads once a tile is cleared
+function paintTileRow(t){
+ $("#tw-"+t).style.backgroundColor=PIECE_COLOR[t];
+ $("#tw-"+t).style.backgroundImage=CFG.tiles[t]?`url("${CFG.tiles[t]}")`:"none";
+ $("#tr-"+t).hidden=!CFG.tiles[t];
+}
+$("#tile-rows").innerHTML=TYPES.map(t=>`
+ <div class="sp tile-row">
+  <span class="tile-label"><span class="tile-swatch" id="tw-${t}"></span>${t}</span>
+  <span class="tile-actions">
+   <button type="button" class="mi ghost tile-upload" id="tu-${t}" data-i18n="set_tile_upload"></button>
+   <input type="file" id="tf-${t}" accept="image/*" hidden tabindex="-1" aria-hidden="true">
+   <button type="button" class="mi ghost tile-reset" id="tr-${t}" data-i18n="set_tile_reset" hidden></button>
+  </span>
+ </div>`).join("")
+ +'<div class="sp full"><button type="button" class="mi ghost" id="tile-clear" data-i18n="set_tile_clearall"></button><small id="tile-note"></small></div>';
+$("#tile-clear").onclick=()=>{
+ TYPES.forEach(t=>{ delete CFG.tiles[t]; loadTile(t,null); });
+ store.set("tiles",CFG.tiles);
+ TYPES.forEach(paintTileRow); paintTileClear(); tileNote("");
+};
+function paintTileClear(){ const b=$("#tile-clear"); if(b) b.hidden=!TYPES.some(t=>CFG.tiles[t]); }
+const MAX_PRESETS=5;
+// one preset is all seven tiles at once; saving copies the current set so a
+// later edit to a tile does not silently rewrite the preset too
+const Presets = {
+ list(){ return Array.isArray(CFG.presets)?CFG.presets:(CFG.presets=[]); },
+ save(name){
+  const l=this.list();
+  if(l.length>=MAX_PRESETS) return tileNote("e_preset_full");
+  const tiles={};
+  for(const t of TYPES) if(CFG.tiles[t]) tiles[t]=CFG.tiles[t];
+  if(!Object.keys(tiles).length) return tileNote("e_preset_empty");
+  l.push({n:String(name||"").slice(0,16)||T("preset_n",{n:l.length+1}), tiles});
+  if(!store.set("presets",l)){ l.pop(); return tileNote("e_preset_space"); }
+  this.paint(); tileNote("");
+ },
+ load(i){
+  const p=this.list()[i];
+  if(!p) return;
+  for(const t of TYPES){
+   if(p.tiles[t]){ CFG.tiles[t]=p.tiles[t]; loadTile(t,p.tiles[t]); }
+   else { delete CFG.tiles[t]; loadTile(t,null); }
+  }
+  store.set("tiles",CFG.tiles);
+  TYPES.forEach(paintTileRow); paintTileClear(); tileNote("");
+ },
+ remove(i){
+  const l=this.list();
+  l.splice(i,1);
+  store.set("presets",l);
+  this.paint();
+ },
+ paint(){
+  const host=$("#preset-rows");
+  if(!host) return;
+  const l=this.list();
+  host.innerHTML=(l.length?l.map((p,i)=>`
+   <div class="sp tile-row">
+    <span class="tile-label">${esc(p.n)}</span>
+    <span class="tile-actions">
+     <button type="button" class="mi ghost" data-pload="${i}" data-i18n="set_preset_load"></button>
+     <button type="button" class="mi ghost" data-pdel="${i}" data-i18n="set_preset_del"></button>
+    </span>
+   </div>`).join("")
+   :'<p class="hint">'+esc(T("preset_none"))+'</p>')
+   +'<div class="sp full"><input class="tf" id="preset-name" maxlength="16" data-i18n-ph="ph_preset"><button type="button" class="mi ghost" id="preset-save" data-i18n="set_preset_save"></button></div>';
+  host.querySelectorAll("[data-pload]").forEach(b=>b.onclick=()=>this.load(+b.dataset.pload));
+  host.querySelectorAll("[data-pdel]").forEach(b=>b.onclick=()=>this.remove(+b.dataset.pdel));
+  $("#preset-save").onclick=()=>{ this.save($("#preset-name").value); $("#preset-name").value=""; };
+  applyLang();
+ }
+};
+Presets.paint();
+$("#b-export").onclick=()=>{
+ try{
+  const blob=new Blob([JSON.stringify(Backup.make())],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="tetris-settings-"+new Date().toISOString().slice(0,10)+".json";
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  UI.ok("#data-hint",T("ok_export"));
+ }catch(e){ UI.err("#data-hint",e.message,true); }
+};
+$("#b-import").onclick=()=>$("#s-import").click();
+$("#s-import").onchange=e=>{
+ const file=e.target.files[0];
+ e.target.value="";
+ if(!file) return;
+ const reader=new FileReader();
+ reader.onerror=()=>UI.err("#data-hint",T("e_badfile"),true);
+ reader.onload=()=>{
+  try{
+   Backup.apply(Backup.check(reader.result));   // validated whole, then applied
+   applyTheme(); applyLang(); repaintSettings();
+   TYPES.forEach(t=>loadTile(t,CFG.tiles[t]||null));
+   TYPES.forEach(paintTileRow); paintTileClear(); Presets.paint();
+   UI.ok("#data-hint",T("ok_import"));
+  }catch(err){ UI.err("#data-hint",err.message,true); }
+ };
+ reader.readAsText(file);
+};
+TYPES.forEach(t=>{
+ paintTileRow(t);
+ $("#tu-"+t).onclick=()=>{ ; $("#tf-"+t).click(); };
+ $("#tf-"+t).onchange=e=>{
+  const file=e.target.files[0];
+  e.target.value="";
+  if(!file) return;
+  if(!file.type.startsWith("image/")) return tileNote("e_tile_type");
+  const reader=new FileReader();
+  reader.onerror=()=>tileNote("e_tile_read");
+  reader.onload=()=>{
+   const img=new Image();
+   // a rejected file used to do nothing at all, with no way to tell why
+   img.onerror=()=>tileNote("e_tile_read");
+   img.onload=()=>{
+    // downscaled before storing: a phone photo would not fit seven times over in localStorage
+    const size=128, side=Math.min(img.naturalWidth,img.naturalHeight);
+    if(!side) return tileNote("e_tile_read");
+    const c=document.createElement("canvas");
+    c.width=c.height=size;
+    const cx=c.getContext("2d");
+    cx.drawImage(img,(img.naturalWidth-side)/2,(img.naturalHeight-side)/2,side,side, 0,0,size,size);
+    // JPEG has no alpha, so a cut-out corner came back filled black
+    let url;
+    try{
+     const d=cx.getImageData(0,0,size,size).data;
+     let clear=false;
+     for(let i=3;i<d.length;i+=4) if(d[i]<250){ clear=true; break; }
+     url=clear?c.toDataURL("image/png"):c.toDataURL("image/jpeg",0.85);
+    }catch(_){ url=c.toDataURL("image/jpeg",0.85); }
+    const was=CFG.tiles[t];
+    CFG.tiles[t]=url;
+    if(store.set("tiles",CFG.tiles)){
+     loadTile(t,url); paintTileRow(t); tileNote(""); ;
+    }else{
+     // storage is full: say so rather than leaving the row unchanged
+     if(was===undefined) delete CFG.tiles[t]; else CFG.tiles[t]=was;
+     tileNote("e_tile_room");
+    }
+   };
+   img.src=reader.result;
+  };
+  reader.readAsDataURL(file);
+ };
+ $("#tr-"+t).onclick=()=>{
+  delete CFG.tiles[t];
+  store.set("tiles",CFG.tiles);
+  loadTile(t,null);
+  paintTileRow(t); paintTileClear(); tileNote("");
+ };
+});
+paintTileClear();
+$("#s-name").value=CFG.name;
+$("#s-name").oninput=e=>{
+ CFG.name=e.target.value.toUpperCase().replace(/[^A-Z0-9 _-]/g,"").slice(0,12)||"PLAYER";
+ e.target.value=CFG.name;
+ saveCfg();
+};
+function solve(W,H,scale,btnY,btnX,noPads){
+ if(noPads){
+  const gap=Math.round(clamp(Math.min(W,H)*0.028,6,16));
+  let SW=W, SH=H, a=SW/SH;
+  if(a>1.9) SW=SH*1.9; else if(a<0.40) SH=SW/0.40;
+  return {SW:Math.floor(SW),SH:Math.floor(SH),ctl:0,pad:0,gap,land:W>H*1.05,lift:0,inset:0,colH:0};
+ }
+ const gap=Math.round(clamp(Math.min(W,H)*0.028,6,16));
+ const colH=c=>c*1.06;
+ const land=W>H*1.05;
+ const up=Math.max(0,clamp(btnY||0,-100,100)/100);
+ const inw=Math.max(0,-clamp(btnX||0,-100,100)/100);
+ let SW,SH,ctl,pad,lift=0,inset=0;
+ if(land){
+  const want=Math.min(232*scale,H/1.06);
+  const natural=(W-Math.min(H*1.5,W*0.6)-gap*2)/2;
+  pad=Math.min(Math.max(want,natural),300*scale,Math.max(56,(W-H*0.45-gap*2)/2));
+  pad=Math.max(pad,56);
+  SW=W-pad*2-gap*2;
+  SH=H;
+  ctl=Math.min(pad,want,H/1.06);
+ }else{
+  const col=(W-gap)/2;
+  ctl=Math.min(col*Math.min(1,scale),240*scale,H*0.30*scale);
+  SW=W;
+  SH=H-gap-colH(ctl);
+  const minH=H*0.45;
+  if(SH<minH){
+   SH=minH;
+   ctl=Math.max(50,Math.min(ctl,(H-SH-gap)/1.06));
+   SH=H-gap-colH(ctl);
+  }
+  pad=col;
+ }
+ SW=Math.max(120,SW); SH=Math.max(120,SH);
+ const band=()=>{
+  const a=SW/SH;
+  if(a>1.9) SW=SH*1.9;
+  else if(a<0.40) SH=SW/0.40;
+ };
+ band();
+ if(!land){
+  lift=Math.round(Math.min(Math.max(0,SH-Math.max(150,H*0.34)),H*0.24)*up);
+  SH-=lift;
+  band();
+ }
+ if(land){
+  inset=Math.round(Math.min(Math.max(0,(SW-Math.max(180,H*0.42))/2),W*0.14)*inw);
+  SW-=inset*2;
+  band();
+ }
+ SW=Math.floor(SW); SH=Math.floor(SH);
+ ctl=Math.max(50,Math.floor(ctl));
+ pad=Math.max(ctl,Math.floor(pad));
+ return {SW,SH,ctl,pad,gap,land,lift,inset,colH:colH(ctl)};
+}
+function offsets(W,H,r){
+ const ty=clamp(CFG.btnY,-100,100)/100, tx=clamp(CFG.btnX,-100,100)/100;
+ let padsY=0, screenY=0;
+ if(r.land){
+  padsY=Math.max(0,(H-r.colH)/2)*-ty;
+ }else{
+  const free=Math.max(0,H-(r.SH+r.gap+r.colH))/2;
+  padsY   = ty>=0 ? -r.lift/2 : free*-ty;
+  screenY = ty>=0 ? -r.lift/2 : free*-ty;
+ }
+ const padsX=Math.max(0,(r.pad-r.ctl)/2)*tx;
+ return {padsX,padsY,screenY};
+}
+function viewportBox(){
+ const cs=getComputedStyle(STAGE), v=s=>parseFloat(s)||0;
+ const vv=window.visualViewport;
+ return {
+  W:Math.max(180,Math.min(STAGE.clientWidth , vv?vv.width :Infinity)-(v(cs.paddingLeft)+v(cs.paddingRight))),
+  H:Math.max(180,Math.min(STAGE.clientHeight, vv?vv.height:Infinity)-(v(cs.paddingTop)+v(cs.paddingBottom)))
+ };
+}
+function layout(){
+ const {W,H}=viewportBox();
+ const r=solve(W,H,CFG.btnScale,CFG.btnY,CFG.btnX,CFG.touch!=="dpad");
+ const o=offsets(W,H,r);
+ STAGE.style.setProperty("--gap",r.gap+"px");
+ STAGE.style.setProperty("--screen-w",(r.SW*CFG.boardScale)+"px");
+ STAGE.style.setProperty("--screen-h",(r.SH*CFG.boardScale)+"px");
+ STAGE.style.setProperty("--ctl",r.ctl+"px");
+ STAGE.style.setProperty("--pad",r.pad+"px");
+ STAGE.style.setProperty("--shift-x",o.padsX+"px");
+ STAGE.style.setProperty("--shift-y",o.padsY+"px");
+ STAGE.style.setProperty("--screen-y",o.screenY+"px");
+ document.body.classList.toggle("land",r.land);
+ document.body.classList.toggle("port",!r.land);
+ resizeCanvas();
+}
+addEventListener("resize",layout);
+addEventListener("orientationchange",()=>{ layout(); setTimeout(layout,180); });
+if(window.visualViewport) visualViewport.addEventListener("resize",layout);
+function setVVH(){
+ const h=window.visualViewport?window.visualViewport.height:innerHeight;
+ document.documentElement.style.setProperty("--vvh",h+"px");
+}
+setVVH();
+addEventListener("resize",setVVH);
+if(window.visualViewport) visualViewport.addEventListener("resize",setVVH);
+$("#chat-in").addEventListener("focus",()=>{
+ setTimeout(()=>$("#chat-in").scrollIntoView({block:"center",behavior:"smooth"}),60);
+});
+$("#pausebtn").addEventListener("click",e=>{ e.preventDefault(); e.stopPropagation(); UI.togglePause(); });
+$("#pausebtn").addEventListener("pointerdown",e=>e.stopPropagation());
+const fsEl =()=>document.fullscreenElement||document.webkitFullscreenElement||null;
+const fsCan=!!(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen);
+function enterFs(){ try{ (document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen).call(document.documentElement); }catch(_){} }
+if(fsCan){
+ $("#fsbtn").hidden=false;
+ $("#fsbtn").addEventListener("click",()=>{ ; enterFs(); });
+ const syncFs=()=>{
+  $("#fsbtn").hidden=!!fsEl();
+  layout();
+  setTimeout(layout,120);
+ };
+ document.addEventListener("fullscreenchange",syncFs);
+ document.addEventListener("webkitfullscreenchange",syncFs);
+}
+// loop() only runs with a well on screen, so nothing else would poll the pad in the menus
+setInterval(()=>{ if(!rafId && (Pad.watching || UI.cur==="#v-set")) Pad.poll(); },60);
+applyLang();
+applyTouchMode();
+applyTheme();
+resizeCanvas();
+UI.netStatus();
+render(null);
+document.addEventListener("visibilitychange",()=>{
+ if(!document.hidden){ if(UI.cur==="#v-lobby") UI.refreshRooms(); return; }
+ if(!G || G.over) return;
+ // Solo can wait for its player; a match cannot — the room has other people
+ // in it and this tab is about to stop running.
+ if(G.mode==="versus") dropOut();
+ else if(!G.paused) UI.togglePause();
+});
+addEventListener("pagehide",()=>{ try{ if(RoomClient.on) RoomClient.leave(); Net.reset(); }catch(e){} });
+</script>
+</body>
+</html>
