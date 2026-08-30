@@ -907,6 +907,7 @@ const I18N = {
  e_tile_room:["No room left in storage — clear a tile and try again.","저장 공간이 부족합니다. 타일을 지우고 다시 시도하세요."],
  e_tile_type:["That file is not an image.","이미지 파일이 아닙니다."],
  set_tile_clearall:["clear all","모두 지우기"],
+ set_tile_garbage:["GARBAGE","방해 블록"],
  set_tile_reset:["reset","초기화"],
  set_tile_upload:["upload","업로드"],
  set_data:["Your data","내 데이터"],
@@ -928,8 +929,8 @@ const I18N = {
  e_preset_full:["Five presets is the limit. Delete one first.","프리셋은 최대 5개입니다. 하나를 먼저 삭제하세요."],
  e_preset_empty:["Upload at least one tile before saving a preset.","프리셋을 저장하려면 타일을 하나 이상 올리세요."],
  e_preset_space:["No room left in storage for another preset.","저장 공간이 부족해 프리셋을 저장할 수 없습니다."],
- set_tiles:["Tetromino tiles","테트로미노 타일"],
- set_tiles_hint:["Upload a square image per piece to use in place of its colour.","조각마다 정사각형 이미지를 올리면 색 대신 타일로 사용됩니다."],
+ set_tiles:["Block tiles","블록 타일"],
+ set_tiles_hint:["Upload a square image per piece, and for the garbage rows sent by opponents, to use in place of its colour.","조각과 상대가 보내는 방해 블록마다 정사각형 이미지를 올리면 색 대신 타일로 사용됩니다."],
  sp_easy:["EASY","쉬움"],
  sp_hard:["HARD","어려움"],
  sp_hint:["The bar under the well is the time you have left. Clearing any line fills it again; letting it empty ends the run. Gravity still climbs a level every ten lines.","보드 아래 막대가 남은 시간입니다. 줄을 지우면 다시 채워지고, 모두 비면 게임이 끝납니다. 10줄마다 레벨이 올라가는 것은 그대로입니다."],
@@ -1044,6 +1045,10 @@ const PIECE_COLOR = {
  I:"#4fd0e0", O:"#e0c94f", T:"#a86fe0", S:"#4fe07a",
  Z:"#e0625f", J:"#5f8fe0", L:"#e0954f", G:"#5a5a5a"
 };
+// garbage already draws through block() as "G" and has its colour above, so a
+// skin for it only ever lacked a way in. kept apart from TYPES on purpose:
+// that list seeds CELLS, OUTLINE and the 7-bag, none of which "G" belongs in
+const TILE_SKINS = TYPES.concat("G");
 const PIECE_TILE = {};
 function loadTile(type,url){
  if(!url){ delete PIECE_TILE[type]; return; }
@@ -3720,9 +3725,9 @@ function paintTileRow(t){
  $("#tw-"+t).style.backgroundImage=CFG.tiles[t]?`url("${CFG.tiles[t]}")`:"none";
  $("#tr-"+t).hidden=!CFG.tiles[t];
 }
-$("#tile-rows").innerHTML=TYPES.map(t=>`
+$("#tile-rows").innerHTML=TILE_SKINS.map(t=>`
  <div class="sp tile-row">
-  <span class="tile-label"><span class="tile-swatch" id="tw-${t}"></span>${t}</span>
+  <span class="tile-label"><span class="tile-swatch" id="tw-${t}"></span>${t==="G"?'<span data-i18n="set_tile_garbage"></span>':t}</span>
   <span class="tile-actions">
    <button type="button" class="mi ghost tile-upload" id="tu-${t}" data-i18n="set_tile_upload"></button>
    <input type="file" id="tf-${t}" accept="image/*" hidden tabindex="-1" aria-hidden="true">
@@ -3731,21 +3736,21 @@ $("#tile-rows").innerHTML=TYPES.map(t=>`
  </div>`).join("")
  +'<div class="sp full"><button type="button" class="mi ghost" id="tile-clear" data-i18n="set_tile_clearall"></button><small id="tile-note"></small></div>';
 $("#tile-clear").onclick=()=>{
- TYPES.forEach(t=>{ delete CFG.tiles[t]; loadTile(t,null); });
+ TILE_SKINS.forEach(t=>{ delete CFG.tiles[t]; loadTile(t,null); });
  store.set("tiles",CFG.tiles);
- TYPES.forEach(paintTileRow); paintTileClear(); tileNote("");
+ TILE_SKINS.forEach(paintTileRow); paintTileClear(); tileNote("");
 };
-function paintTileClear(){ const b=$("#tile-clear"); if(b) b.hidden=!TYPES.some(t=>CFG.tiles[t]); }
+function paintTileClear(){ const b=$("#tile-clear"); if(b) b.hidden=!TILE_SKINS.some(t=>CFG.tiles[t]); }
 const MAX_PRESETS=5;
-// one preset is all seven tiles at once; saving copies the current set so a
-// later edit to a tile does not silently rewrite the preset too
+// one preset is the whole set at once, garbage included; saving copies the
+// current tiles so a later edit to one does not silently rewrite the preset
 const Presets = {
  list(){ return Array.isArray(CFG.presets)?CFG.presets:(CFG.presets=[]); },
  save(name){
   const l=this.list();
   if(l.length>=MAX_PRESETS) return tileNote("e_preset_full");
   const tiles={};
-  for(const t of TYPES) if(CFG.tiles[t]) tiles[t]=CFG.tiles[t];
+  for(const t of TILE_SKINS) if(CFG.tiles[t]) tiles[t]=CFG.tiles[t];
   if(!Object.keys(tiles).length) return tileNote("e_preset_empty");
   l.push({n:String(name||"").slice(0,16)||T("preset_n",{n:l.length+1}), tiles});
   if(!store.set("presets",l)){ l.pop(); return tileNote("e_preset_space"); }
@@ -3754,12 +3759,12 @@ const Presets = {
  load(i){
   const p=this.list()[i];
   if(!p) return;
-  for(const t of TYPES){
+  for(const t of TILE_SKINS){
    if(p.tiles[t]){ CFG.tiles[t]=p.tiles[t]; loadTile(t,p.tiles[t]); }
    else { delete CFG.tiles[t]; loadTile(t,null); }
   }
   store.set("tiles",CFG.tiles);
-  TYPES.forEach(paintTileRow); paintTileClear(); tileNote("");
+  TILE_SKINS.forEach(paintTileRow); paintTileClear(); tileNote("");
  },
  remove(i){
   const l=this.list();
@@ -3810,14 +3815,14 @@ $("#s-import").onchange=e=>{
   try{
    Backup.apply(Backup.check(reader.result));   // validated whole, then applied
    applyTheme(); applyLang(); repaintSettings();
-   TYPES.forEach(t=>loadTile(t,CFG.tiles[t]||null));
-   TYPES.forEach(paintTileRow); paintTileClear(); Presets.paint();
+   TILE_SKINS.forEach(t=>loadTile(t,CFG.tiles[t]||null));
+   TILE_SKINS.forEach(paintTileRow); paintTileClear(); Presets.paint();
    UI.ok("#data-hint",T("ok_import"));
   }catch(err){ UI.err("#data-hint",err.message,true); }
  };
  reader.readAsText(file);
 };
-TYPES.forEach(t=>{
+TILE_SKINS.forEach(t=>{
  paintTileRow(t);
  $("#tu-"+t).onclick=()=>{ ; $("#tf-"+t).click(); };
  $("#tf-"+t).onchange=e=>{
@@ -3832,7 +3837,7 @@ TYPES.forEach(t=>{
    // a rejected file used to do nothing at all, with no way to tell why
    img.onerror=()=>tileNote("e_tile_read");
    img.onload=()=>{
-    // downscaled before storing: a phone photo would not fit seven times over in localStorage
+    // downscaled before storing: a phone photo would not fit eight times over in localStorage
     const size=128, side=Math.min(img.naturalWidth,img.naturalHeight);
     if(!side) return tileNote("e_tile_read");
     const c=document.createElement("canvas");
