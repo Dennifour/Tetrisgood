@@ -1438,13 +1438,47 @@ function solveWell(W,H,foes,below){
  }
  return {x, y, w:bw, h:bh, cell, gut, headerH:topM, colW, gw, x0, opps};
 }
+const SPEC_MAX=4;
+// spectating draws none of your own well, hold, next or hud, so every board on
+// screen belongs to a player and they share the canvas evenly, side by side
+function specBoxes(W,H,n){
+ if(n<=0) return [];
+ const gut=Math.max(4,Math.min(W,H)*0.018);
+ const topM=Math.max(6,H*0.030), botM=Math.max(6,H*0.030);
+ const availH=Math.max(40,H-topM-botM);
+ const lane=(W-gut*2-(n-1)*gut*1.2)/n;
+ // the name sits under its board, so it comes out of the height budget. it is
+ // sized from the cell it is budgeting for, so the two settle in a second pass
+ const labelFor=c=>Math.max(9,c*0.42)*1.5;
+ let cell=Math.max(2,Math.min(lane/10,availH/20));
+ for(let i=0;i<2;i++) cell=Math.max(2,Math.min(lane/10,(availH-labelFor(cell))/20));
+ const bw=cell*10, bh=cell*20;
+ let x=(W-(n*bw+(n-1)*gut*1.2))/2;
+ const y=topM+(availH-bh-labelFor(cell))/2;
+ const out=[];
+ for(let i=0;i<n;i++){ out.push({x,y,w:bw,h:bh,cell}); x+=bw+gut*1.2; }
+ return out;
+}
 function wellBox(W,H,foes){
  foes=Math.max(0,Math.min(3,foes|0));
  // opponents always sit beside your board, side by side, never stacked underneath
  return solveWell(W,H,foes,false);
 }
-let TWIN=0;
+let TWIN=0, SPEC=0;
 function computeLayout(){
+ if(SPEC>0){
+  const boxes=specBoxes(CW,CH,SPEC);
+  const cell=boxes[0].cell;
+  // the rest is stubbed rather than omitted: TS() and drawBanners() read L.cell
+  // and the well box, and neither should have to know about this mode
+  L={cell, gut:Math.max(4,Math.min(CW,CH)*0.018), headerH:Math.max(6,CH*0.030),
+     tile:cell*2, ntile:cell*2, step:cell*3,
+     bx:0, by:0, bw:CW, bh:CH, gx:0, gy:0, gw:0, gh:0,
+     hold:{x:0,y:0,w:0,h:0}, hud:{x:0,y:0,w:0,h:0,r:0},
+     next:{x:0,y:0,w:0,h:0}, fuse:{x:0,y:0,w:0,h:0},
+     opps:[], spec:boxes};
+  return;
+ }
  const b=wellBox(CW,CH,TWIN);
  const {cell,gut,headerH,colW,gw,x0}=b;
  const tile=colW/4.4;
@@ -1618,6 +1652,20 @@ function render(g, opp){
   ctx.clearRect(0,0,cv.width,cv.height);
   return;
  }
+ if(g.spectating){
+  // a KO'd well is dropped and the survivors close the gap: watching a board
+  // that has already topped out tells you nothing the room screen cannot
+  const live=(opp||[]).filter(f=>!f.dead).slice(0,SPEC_MAX);
+  if(SPEC!==live.length){ SPEC=live.length; TWIN=-1; computeLayout(); }
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  live.forEach((f,i)=>drawOpponent(f,i,g,L.spec[i]));
+  drawBanners();
+  ctx.setTransform(1,0,0,1,0,0);
+  return;
+ }
+ if(SPEC){ SPEC=0; computeLayout(); }
  const foes=g.mode==="versus"?Math.min(3,(opp||[]).length):0;
  if(TWIN!==foes){ TWIN=foes; computeLayout(); }
  ctx.setTransform(1,0,0,1,0,0);
@@ -1763,8 +1811,8 @@ function drawNext(g){
   ctx.globalAlpha=1;
  });
 }
-function drawOpponent(opp,i,g){
- const b=L.opps&&L.opps[i];
+function drawOpponent(opp,i,g,box){
+ const b=box||(L.opps&&L.opps[i]);
  if(!b) return;
  const cell=b.w/COLS;
  ctx.fillStyle=rgba(INK.well,WELL_A); ctx.fillRect(b.x,b.y,b.w,b.h);
@@ -2172,7 +2220,10 @@ function resolveRound(){
 function watchRound(){
  if(!G||!G.spectating||G.watched||G.stranded||!RoomClient.on) return;
  const rv=RoomClient.view();
- if(!rv.roster||rv.alive.length) return;
+ if(!rv.roster) return;
+ // attack ends when one is left standing; under the score rule everyone plays
+ // their own clock out, so it is over only once the last well has stopped
+ if(G.attacks ? rv.alive.length>1 : rv.alive.length>0) return;
  G.watched=true;
  const watched=G;
  setTimeout(()=>{ if(G!==watched) return; UI.showRoom(); dropBoard(); },RESULT_DELAY_MS);
@@ -2233,7 +2284,9 @@ function startGame(mode,spectating){
  UI.hideGameOver(); UI.closePauseMenu();
  G=new Game(mode);
  if(spectating){ G.spectating=true; G.over=true; }
- COUNT=3; countEnd=now()+3000; startHoldEnd=0;
+ // a spectator's game is over from the first frame, so loop() never reaches
+ // the branch that counts this down: left at 3 it drew a frozen 3 over them
+ COUNT=spectating?0:3; countEnd=now()+3000; startHoldEnd=0;
  if(mode==="versus"){
   // RoomClient.starting is deliberately left alone: onRound() re-arms it right
   // after this call, and zeroing it here killed the only guard against the
