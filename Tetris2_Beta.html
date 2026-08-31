@@ -2576,6 +2576,22 @@ const Sig = {
  on(){ return /^https?:\/\/.+/i.test(this.base()); },
  url(p){ return this.base()+p+".json"; },
  sleep(ms){ return new Promise(r=>setTimeout(r,ms)); },
+ // every room timestamp -- seat heartbeats, the lobby entry, chat keys -- used
+ // to be written with the writer's own Date.now() and then compared against the
+ // reader's. two devices whose clocks differ by more than SEAT_TTL therefore
+ // read each other as long expired: the room vanished from the joiner's lobby
+ // list, and a seat that did get in was invisible to everyone else. every
+ // response carries a Date header, so the server's clock is free to track
+ skew:0, synced:false,
+ now(){ return Date.now()+this.skew; },
+ // only needed before the very first write of a session; any response primes it
+ async sync(){ if(!this.synced) try{ await this.req("/lobby",{cache:"no-store"},1); }catch(e){} },
+ readClock(r){
+  const d=Date.parse(r.headers.get("date")||"");
+  if(!isFinite(d)) return;
+  this.skew=d-Date.now();
+  this.synced=true;
+ },
  // retried and awaited: a lost write is what desynchronised the old room
  async req(path,opt,tries){
   const n=tries==null?SIG_TRIES:tries;
@@ -2584,6 +2600,7 @@ const Sig = {
    let r;
    try{ r=await fetch(this.url(path),opt); }
    catch(e){ last=new Error(T("e_fbnet")); await this.sleep(SIG_BASE_MS*(1<<i)+rnd(SIG_BASE_MS)); continue; }
+   this.readClock(r);
    if(r.status===412) return {conflict:true};
    if(r.status===401||r.status===403) throw new Error(T("e_fbauth",{p:path}));
    if(!r.ok){ last=new Error(T("e_fbnet")); await this.sleep(SIG_BASE_MS*(1<<i)+rnd(SIG_BASE_MS)); continue; }
@@ -2688,7 +2705,7 @@ const RoomClient = {
  settle(seat){ for(const k of Object.keys(this.pend)) if(!!(seat||{})[k]===!!this.pend[k]) delete this.pend[k]; },
  // the local seat as the buttons should read it: streamed, with the last click over it
  myIntent(v){ return Object.assign({rdy:false,spec:false},(v.seats.find(s=>s.pid===PID)||null),this.pend); },
- view(){ return RoomState.view(this.st||RoomState.make(PID), Date.now()); },
+ view(){ return RoomState.view(this.st||RoomState.make(PID), Sig.now()); },
  // a go signal is in flight, or the round it announced has just begun
  busy(){ return !!this.starting && now()-this.starting<8000; },
  isHost(){ return this.on && this.view().host===PID; },
@@ -2698,14 +2715,15 @@ const RoomClient = {
  async listRooms(){
   if(!Sig.on()) throw new Error(T("e_nofb"));
   const idx=await Sig.get("/lobby")||{};
-  const t0=Date.now();
+  const t0=Sig.now();
   return Object.keys(idx).filter(id=>t0-((idx[id]||{}).t||0)<LOBBY_TTL)
    .map(id=>({id, name:String((idx[id]||{}).n||"").slice(0,12), count:(idx[id]||{}).c|0}));
  },
  async create(){
   if(!Sig.on()) throw new Error(T("e_nofb"));
   PID=PID||roomId(8);
-  const id=roomId(6), t=Date.now();
+  await Sig.sync();                       // the host's own seat is the one everyone else ages
+  const id=roomId(6), t=Sig.now();
   NET_RULE="attack";
   await Sig.put("/rooms/"+id,{meta:{h:PID,r:"attack"}, seat:{[PID]:{n:CFG.name,j:t,hb:t,w:0}}});
   await Sig.put("/lobby/"+id,{n:CFG.name,t,c:1});
@@ -2717,7 +2735,7 @@ const RoomClient = {
   PID=PID||roomId(8);
   const v=await Sig.get("/rooms/"+id);
   if(!v||!v.meta) throw new Error(T("e_noroom"));
-  const t=Date.now();
+  const t=Sig.now();
   // cas closes the check-then-act race the old seat count had
   const seat=await Sig.cas("/rooms/"+id+"/seat",cur=>{
    const m=cur||{};
@@ -2787,7 +2805,7 @@ const RoomClient = {
   // began. undelivered attacks from the finished round go with them
   await Sig.del(this.path()+"/live");
   await Sig.del(this.path()+"/gb");
-  await Sig.put(this.path()+"/go",{s:((Math.random()*0xffffffff)>>>0)||1, r:NET_RULE, at:Date.now(), roster});
+  await Sig.put(this.path()+"/go",{s:((Math.random()*0xffffffff)>>>0)||1, r:NET_RULE, at:Sig.now(), roster});
  },
  onRound(v){
   if(!this.isHost() && !this.busy()) NET_RULE=v.rule;
@@ -2847,11 +2865,11 @@ const RoomClient = {
   if(!this.on) return;
   const t=String(text).slice(0,120);
   if(!t.trim()) return;
-  await Sig.put("/chat/"+this.id+"/"+(Date.now()+"-"+PID),{n:CFG.name,m:t});
+  await Sig.put("/chat/"+this.id+"/"+(Sig.now()+"-"+PID),{n:CFG.name,m:t});   // the log is sorted on this key
  },
  async beat(){
   if(!this.on) return;
-  const t=Date.now();
+  const t=Sig.now();
   try{
    await Sig.patch(this.mine(),{hb:t});
    const n=this.view().seats.filter(s=>s.fresh).length||1;
@@ -2873,7 +2891,7 @@ const RoomClient = {
    await Sig.del("/rooms/"+id+"/gb/"+PID);   // else it is waiting to bury you on your next visit
    // re-read rather than trust the last snapshot: two players can leave at once
    const left=await Sig.get("/rooms/"+id+"/seat");
-   const t=Date.now();
+   const t=Sig.now();
    const live=Object.keys(left||{}).filter(k=>t-((left[k]||{}).hb||0)<SEAT_TTL);
    if(live.length){ await Sig.patch("/lobby/"+id,{t,c:live.length}); return; }
    await Sig.del("/rooms/"+id);
@@ -3274,13 +3292,18 @@ const UI = {
   if(!list) return;
   try{
    const rooms=await RoomClient.listRooms();
+   // this re-lists every 3s. rebuilding an unchanged list replaced the very
+   // button the finger was already down on, and the tap landed on nothing
+   const sig=CFG.lang+":"+JSON.stringify(rooms);
+   if(sig===this._roomSig) return;
+   this._roomSig=sig;
    list.classList.toggle("has-rooms",!!rooms.length);
    if(!rooms.length){ list.innerHTML='<p class="diag" id="on-none">'+esc(T("on_none"))+'</p>'; return; }
    list.innerHTML=rooms.map(r=>
     '<button class="room-row" data-room="'+esc(r.id)+'"><span class="nm">'+esc(r.name||T("opponent"))+
     '</span><span class="sub">'+esc(T("on_seats",{n:r.count||1,max:MAX_SEATS}))+'</span></button>').join("");
    list.querySelectorAll("[data-room]").forEach(b=>b.onclick=()=>this.doJoinRoom(b.dataset.room));
-  }catch(e){ this.err("#srv-hint",e.message,true); }
+  }catch(e){ this._roomSig=null; this.err("#srv-hint",e.message,true); }
  },
  async doMakeRoom(){
   Net.reset();
