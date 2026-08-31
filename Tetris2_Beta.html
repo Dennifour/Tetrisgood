@@ -505,6 +505,15 @@ html[lang=ko] .fold summary h3{letter-spacing:.02em}
     <section class="panel" data-panel="audio" role="tabpanel" id="panel-audio">
      <h3 data-i18n="set_sound"></h3>
      <p class="hint" data-i18n="set_sound_hint"></p>
+     <h3 data-i18n="set_radio"></h3>
+     <p class="hint" data-i18n="set_radio_hint"></p>
+     <div class="opts">
+      <div class="sp"><span data-i18n="set_radio_on"></span><button type="button" role="switch" aria-checked="false" class="sw" id="s-radioon"></button></div>
+      <div class="sp rng"><span><span data-i18n="set_radio_vol"></span><small id="l-radiovol"></small></span><input type="range" data-i18n-aria="set_radio_vol" id="s-radiovol" min="0" max="100" step="5"></div>
+     </div>
+     <div class="row mt8"><button class="mi ctr" type="button" id="b-radiofolder"></button></div>
+     <input type="file" id="radio-fallback" webkitdirectory multiple accept="audio/*" hidden>
+     <p class="hint" id="radio-hint"></p>
     </section>
     <section class="panel" data-panel="controls" role="tabpanel" id="panel-controls">
      <h3 data-i18n="set_handling"></h3>
@@ -598,6 +607,8 @@ const CFG = {
  sdf:   store.get("sdf",8),
  snd:   store.get("snd",true),
  vol:   store.get("vol",100),
+ radioOn:  store.get("radioOn",true),
+ radioVol: store.get("radioVol",70),
  bob:   store.get("bob", store.get("shake",true)),
  ghost: store.get("ghost",true),
  grid:  store.get("grid",false),
@@ -895,6 +906,19 @@ const I18N = {
  set_sig_hint:["Firebase Realtime Database URL. It carries the room list and the match itself, so you can play on networks that block a direct link. Swapping codes by hand never touches it.","Firebase 실시간 데이터베이스 주소. 방 목록과 경기 자체를 전달하므로 직접 연결이 막힌 네트워크에서도 플레이할 수 있습니다. 코드를 직접 주고받는 방식은 이 주소를 사용하지 않습니다."],
  set_sound:["Sound","소리"],
  set_sound_hint:["To be updated.","추후 업데이트 예정입니다."],
+ set_radio:["Marathon radio","마라톤 라디오"],
+ set_radio_hint:["Point it at a folder of your own music and it plays in the background during Marathon, shuffled fresh each run.","좋아하는 음악이 담긴 폴더를 선택하면 마라톤 플레이 중 배경음악으로 재생됩니다. 매 판마다 새로 섞입니다."],
+ set_radio_on:["Play music in Marathon","마라톤에서 음악 재생"],
+ set_radio_vol:["Music volume","음악 음량"],
+ set_radio_pick:["CHOOSE MUSIC FOLDER","음악 폴더 선택"],
+ set_radio_change:["CHANGE FOLDER","폴더 변경"],
+ set_radio_reconnect:["RECONNECT FOLDER","폴더 다시 연결"],
+ radio_none:["No folder chosen yet.","아직 폴더를 선택하지 않았습니다."],
+ radio_found:["{n} track(s) from “{name}”.","“{name}”에서 트랙 {n}개."],
+ radio_empty:["No playable audio files were found in that folder.","그 폴더에서 재생 가능한 오디오 파일을 찾지 못했습니다."],
+ radio_reconnect:["This browser needs permission again to read “{name}”.","브라우저가 “{name}” 폴더를 다시 읽으려면 권한이 필요합니다."],
+ radio_session_only:["This browser can't remember the folder — you'll need to choose it again next visit.","이 브라우저는 폴더를 기억할 수 없어 다음 방문 때 다시 선택해야 합니다."],
+ e_radio_denied:["Permission to read that folder was refused.","그 폴더를 읽을 권한이 거부되었습니다."],
  set_swap:["D-pad on the right","방향키를 오른쪽에"],
  set_swap_s:["Swaps the D-pad and the A/B buttons.","방향키와 A/B 버튼의 위치를 바꿉니다."],
  set_swdrop:["Drag to drop one row","한 줄 드롭 거리"],
@@ -984,6 +1008,7 @@ function applyLang(){
  }
  if(typeof repaintSettings==="function") repaintSettings();
  if(typeof tileNote==="function") tileNote();   // re-render in the new language
+ if(typeof paintRadioPanel==="function") paintRadioPanel();
 }
 const SHAPES = {
  I:["....","IIII","....","...."],
@@ -1109,6 +1134,232 @@ class Bag {
  next(){ while(this.q.length<8) this.fill(); return this.q.shift(); }
  peek(n){ while(this.q.length<n+2) this.fill(); return this.q.slice(0,n); }
 }
+
+// a tiny key-value store for one thing: the FileSystemDirectoryHandle the
+// player granted, so the radio does not ask for the folder on every visit
+const RadioDB = {
+ _db:null,
+ open(){
+  if(this._db) return Promise.resolve(this._db);
+  return new Promise((res,rej)=>{
+   const rq=indexedDB.open("tfx-radio",1);
+   rq.onupgradeneeded=()=>rq.result.createObjectStore("kv");
+   rq.onsuccess=()=>{ this._db=rq.result; res(this._db); };
+   rq.onerror=()=>rej(rq.error);
+  });
+ },
+ async get(k){
+  try{
+   const db=await this.open();
+   return await new Promise((res,rej)=>{
+    const rq=db.transaction("kv","readonly").objectStore("kv").get(k);
+    rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error);
+   });
+  }catch(e){ return undefined; }
+ },
+ async set(k,v){
+  try{
+   const db=await this.open();
+   await new Promise((res,rej)=>{
+    const rq=db.transaction("kv","readwrite").objectStore("kv").put(v,k);
+    rq.onsuccess=()=>res(); rq.onerror=()=>rej(rq.error);
+   });
+  }catch(e){}
+ }
+};
+const RADIO_EXT=/\.(mp3|ogg|oga|opus|wav|m4a|aac|flac|weba)$/i;
+const RADIO_GAP_MS=3000;
+// best-effort title/artist: ID3v2 (mp3), then ID3v1, then the filename's own
+// "Artist - Title" convention. Never throws -- a track with no readable tag
+// still plays, just labelled by its filename
+async function readTags(file){
+ const name=file.name.replace(/\.[^.]+$/,"");
+ const fromName=()=>{
+  const m=/^(.+?)\s*-\s*(.+)$/.exec(name);
+  return m?{artist:m[1].trim(),title:m[2].trim()}:{artist:"",title:name};
+ };
+ try{
+  const head=new Uint8Array(await file.slice(0,256*1024).arrayBuffer());
+  if(head[0]===0x49&&head[1]===0x44&&head[2]===0x33){   // "ID3"
+   const ver=head[3];
+   const syncsafe=(a,b,c,d)=>((a&0x7f)<<21)|((b&0x7f)<<14)|((c&0x7f)<<7)|(d&0x7f);
+   const tagLen=syncsafe(head[6],head[7],head[8],head[9]);
+   let p=10;
+   if(head[5]&0x40) p+=6;   // extended header: rare, and a miscounted skip just
+                             // means the frame loop below bails to the filename
+   const dec=(txt)=>{
+    const enc=txt[0], bytes=txt.subarray(1);
+    try{
+     if(enc===1) return new TextDecoder("utf-16").decode(bytes).replace(/\u0000+$/,"");
+     if(enc===2) return new TextDecoder("utf-16be").decode(bytes).replace(/\u0000+$/,"");
+     if(enc===3) return new TextDecoder("utf-8").decode(bytes).replace(/\u0000+$/,"");
+    }catch(e){}
+    return Array.from(bytes).map(b=>String.fromCharCode(b)).join("").replace(/\u0000+$/,"");
+   };
+   const out={};
+   // the true end of the tag is header+frames; the stray "-10" here would
+   // have cut the scan short on any file whose full tag fit inside the
+   // 256KB read with little slack left over
+   const end=Math.min(10+tagLen, head.length);
+   while(p<end){
+    let id,size;
+    if(ver>=3){
+     id=String.fromCharCode(head[p],head[p+1],head[p+2],head[p+3]);
+     if(!/^[A-Z0-9]{4}$/.test(id)) break;
+     size = ver===4 ? syncsafe(head[p+4],head[p+5],head[p+6],head[p+7])
+                    : (head[p+4]<<24|head[p+5]<<16|head[p+6]<<8|head[p+7]);
+     p+=10;
+    }else{
+     id=String.fromCharCode(head[p],head[p+1],head[p+2]);
+     if(!/^[A-Z0-9]{3}$/.test(id)) break;
+     size=(head[p+3]<<16|head[p+4]<<8|head[p+5]);
+     p+=6;
+    }
+    if(size<=0||p+size>head.length) break;
+    const body=head.subarray(p,p+size);
+    if(id==="TIT2"||id==="TT2") out.title=dec(body);
+    if(id==="TPE1"||id==="TP1") out.artist=dec(body);
+    p+=size;
+   }
+   if(out.title||out.artist){
+    const fb=fromName();
+    return {title:out.title||fb.title, artist:out.artist||""};
+   }
+  }
+  if(file.size>=128){
+   const tail=new Uint8Array(await file.slice(file.size-128,file.size).arrayBuffer());
+   if(tail[0]===0x54&&tail[1]===0x41&&tail[2]===0x47){   // "TAG"
+    const str=(o,n)=>{ let s=""; for(let i=0;i<n;i++){ if(!tail[o+i]) break; s+=String.fromCharCode(tail[o+i]); } return s.trim(); };
+    const title=str(3,30), artist=str(33,30);
+    if(title||artist){ const fb=fromName(); return {title:title||fb.title, artist}; }
+   }
+  }
+ }catch(e){}
+ return fromName();
+}
+// Marathon-only background music: a shuffled local folder, one <audio>
+// element reused for every track, a 3s gap between songs, and no state that
+// outlives "exit to menu" except the folder handle itself
+const Radio = {
+ el:null, dirHandle:null, dirName:"", permState:null,
+ tracks:[], queue:[], qi:-1, curUrl:"", meta:null, active:false, gapTimer:0,
+ init(){
+  this.el=new Audio();
+  this.el.addEventListener("ended",()=>this.onEnded());
+  this.el.addEventListener("error",()=>this.onEnded());   // an undecodable file should not stall the playlist
+ },
+ supported(){ return typeof window.showDirectoryPicker==="function"; },
+ // silent reclaim at startup: queryPermission needs no user gesture, but a
+ // grant is not necessarily durable, so this can still land on "prompt"
+ async restore(){
+  if(!this.supported()) return;
+  const h=await RadioDB.get("dir");
+  if(!h) return;
+  this.dirHandle=h; this.dirName=h.name;
+  try{ this.permState=await h.queryPermission({mode:"read"}); }catch(e){ this.permState="denied"; }
+  if(this.permState==="granted") await this.scan();
+  if(typeof paintRadioPanel==="function") paintRadioPanel();
+ },
+ async pickFolder(){
+  if(this.supported()){
+   let h;
+   try{ h=await window.showDirectoryPicker({id:"tetris-radio",mode:"read"}); }
+   catch(e){ return; }   // cancelled
+   this.dirHandle=h; this.dirName=h.name; this.permState="granted";
+   RadioDB.set("dir",h);
+   await this.scan();
+  }else{
+   $("#radio-fallback").click();
+  }
+ },
+ // requestPermission needs a real click behind it, which is exactly what
+ // called this -- queryPermission alone can never re-open the prompt
+ async reconnect(){
+  if(!this.dirHandle) return;
+  try{ this.permState=await this.dirHandle.requestPermission({mode:"read"}); }
+  catch(e){ this.permState="denied"; }
+  if(this.permState==="granted") await this.scan();
+ },
+ // the <input webkitdirectory> fallback hands over a FileList, not a handle:
+ // no permission object, and nothing that survives to the next page load
+ async useFileList(files){
+  this.dirHandle=null; this.permState=null;
+  this.dirName=(files[0]&&files[0].webkitRelativePath||"").split("/")[0]||T("opponent");
+  await this.buildTracks(Array.from(files).filter(f=>RADIO_EXT.test(f.name)));
+ },
+ async scan(){
+  if(!this.dirHandle) return;
+  const files=[];
+  const walk=async dir=>{
+   try{
+    for await (const [name,handle] of dir.entries()){
+     try{
+      if(handle.kind==="file"){ if(RADIO_EXT.test(name)) files.push(await handle.getFile()); }
+      else await walk(handle);
+     }catch(e){}   // one unreadable entry should not cost the rest of the folder
+    }
+   }catch(e){}
+  };
+  await walk(this.dirHandle);
+  await this.buildTracks(files);
+ },
+ async buildTracks(files){
+  this.tracks=files.map(f=>({file:f,title:null,artist:null}));
+  if(typeof paintRadioPanel==="function") paintRadioPanel();
+ },
+ shuffle(){
+  this.queue=this.tracks.slice();
+  for(let i=this.queue.length-1;i>0;i--){
+   const j=(Math.random()*(i+1))|0;
+   [this.queue[i],this.queue[j]]=[this.queue[j],this.queue[i]];
+  }
+  this.qi=-1;
+ },
+ // the one entry point: called exactly once per game, the frame the current
+ // piece starts falling under gravity
+ start(){
+  if(!CFG.radioOn || !this.tracks.length) return;
+  clearTimeout(this.gapTimer); this.gapTimer=0;
+  this.shuffle();
+  this.advance();
+ },
+ advance(){
+  this.qi++;
+  if(this.qi>=this.queue.length){ this.shuffle(); this.qi=0; }   // reshuffled once the shuffled order is exhausted
+  this.playCurrent();
+ },
+ async playCurrent(){
+  const t=this.queue[this.qi];
+  if(!t) return;
+  if(this.curUrl) URL.revokeObjectURL(this.curUrl);
+  this.curUrl=URL.createObjectURL(t.file);
+  this.el.src=this.curUrl;
+  this.el.volume=(CFG.radioVol||0)/100;
+  this.active=true;
+  this.meta={title:t.title||t.file.name.replace(/\.[^.]+$/,""), artist:t.artist||""};
+  if(t.title===null){
+   readTags(t.file).then(tag=>{
+    t.title=tag.title; t.artist=tag.artist;
+    if(this.queue[this.qi]===t) this.meta={title:tag.title,artist:tag.artist};
+   });
+  }
+  try{ await this.el.play(); }catch(e){ this.onEnded(); }   // e.g. an autoplay refusal -- move on rather than sit silent forever
+ },
+ onEnded(){
+  if(!this.active) return;
+  clearTimeout(this.gapTimer);
+  this.gapTimer=setTimeout(()=>{ this.gapTimer=0; if(this.active) this.advance(); },RADIO_GAP_MS);
+ },
+ setVolume(v){ this.el.volume=v/100; },
+ // the only door back to the menu from Marathon calls this; nothing else does
+ stop(){
+  this.active=false;
+  clearTimeout(this.gapTimer); this.gapTimer=0;
+  this.el.pause();
+  if(this.curUrl){ URL.revokeObjectURL(this.curUrl); this.curUrl=""; }
+  this.meta=null;
+ }
+};
 class Game {
  constructor(mode="solo"){
   this.mode = mode;
@@ -1132,6 +1383,7 @@ class Game {
   this.garbageHole=rnd(COLS);
   this.over=false; this.won=false; this.paused=false; this.spectating=false;
   this.stranded=false; this.watched=false;
+  this.radioArmed=true;
   this.resolved=false; this.pending=false; this.pendingAt=0;
   this.startedAt=now(); this.endedAt=0;
   this.pieceCount=0;
@@ -1702,7 +1954,18 @@ function render(g, opp){
  if(COUNT>0 && g===G) drawCountdown();
  else if(startHoldEnd && g===G) drawStartText();
  drawBanners();
+ drawRadioNow();
  ctx.setTransform(1,0,0,1,0,0);
+}
+// small text, bottom-right of the screen: only ever has something to say
+// during Marathon, since Radio.meta is null everywhere else in the app
+function drawRadioNow(){
+ if(!Radio.meta) return;
+ const m=Radio.meta;
+ const str=m.artist ? (m.title+" — "+m.artist) : m.title;
+ const pad=Math.max(8,CW*0.012);
+ const sz=Math.max(10,Math.min(TS(0.4),CH*0.022));
+ textFit(str,CW-pad,CH-pad,sz,INK.faint,"right",600,sz*0.06,CW*0.46);
 }
 function drawWell(g){
  const {bx,by,bw,bh,cell}=L;
@@ -2334,6 +2597,7 @@ function loop(t){
     if(now()>=startHoldEnd) startHoldEnd=0;
    }
   }else{
+   if(G.radioArmed){ G.radioArmed=false; if(G.mode==="solo") Radio.start(); }
    Input.tick(dt);
    G.tick(dt,{soft:Input.soft});
   }
@@ -3176,6 +3440,7 @@ const UI = {
   // rather than dropping the seat along with it
   if(G && G.mode==="versus" && G.spectating && RoomClient.on){ G.watched=true; this.showRoom(); dropBoard(); return; }
   if(G && G.mode==="versus"){ this.leaveRoom(); return; }
+  Radio.stop();
   this.show("#v-home");
   dropBoard();
  },
@@ -3447,7 +3712,7 @@ const UI = {
   $$("#set-rail [data-tab]").forEach(b=>{ const on=b.dataset.tab===name; b.classList.toggle("on",on); b.setAttribute("aria-selected",on); });
   $$("#v-set .panel").forEach(p=>p.classList.toggle("on",p.dataset.panel===name));
   if(name==="controls"){ repaintSettings(); paintTouch(); bindRows("#keylist","keys"); bindRows("#padlist","pads"); paintPad(); }
-  if(name==="audio") repaintSettings();
+  if(name==="audio"){ repaintSettings(); paintRadioPanel(); }
  },
  err(sel,msg,stay){ this.flash(sel,msg,"#ff7b8a",stay); },
  ok(sel,msg){ this.flash(sel,msg,"#4fe0a8"); },
@@ -3781,6 +4046,38 @@ $$(".lang").forEach(b=>{
 });
 $("#s-fb").value=CFG.fbUrl;
 $("#s-fb").oninput=e=>{ CFG.fbUrl=e.target.value.trim(); saveCfg(); };
+function paintRadioPanel(){
+ const btn=$("#b-radiofolder"), hint=$("#radio-hint");
+ if(!btn||!hint) return;
+ const needReconnect=!!(Radio.dirHandle && Radio.permState && Radio.permState!=="granted");
+ btn.textContent=T(needReconnect?"set_radio_reconnect":(Radio.dirName?"set_radio_change":"set_radio_pick"));
+ if(needReconnect) hint.textContent=T("radio_reconnect",{name:Radio.dirName});
+ else if(!Radio.dirName) hint.textContent=T("radio_none");
+ else if(!Radio.tracks.length) hint.textContent=T("radio_empty");
+ else hint.textContent=T("radio_found",{n:Radio.tracks.length,name:Radio.dirName})+(Radio.supported()?"":(" "+T("radio_session_only")));
+}
+$("#b-radiofolder").onclick=async()=>{
+ const needReconnect=!!(Radio.dirHandle && Radio.permState && Radio.permState!=="granted");
+ if(needReconnect) await Radio.reconnect(); else await Radio.pickFolder();
+ paintRadioPanel();
+};
+$("#radio-fallback").onchange=e=>{
+ const files=e.target.files;
+ e.target.value="";
+ if(files && files.length) Radio.useFileList(files).then(paintRadioPanel);
+};
+const radioToggle=$("#s-radioon");
+radioToggle.classList.toggle("on",!!CFG.radioOn);
+radioToggle.setAttribute("aria-checked",!!CFG.radioOn);
+radioToggle.onclick=()=>{
+ CFG.radioOn=!CFG.radioOn;
+ radioToggle.classList.toggle("on",CFG.radioOn);
+ radioToggle.setAttribute("aria-checked",CFG.radioOn);
+ saveCfg();
+ if(!CFG.radioOn) Radio.stop();
+};
+bindRange("#s-radiovol","radioVol","#l-radiovol",v=>v+"%",()=>Radio.setVolume(CFG.radioVol));
+paintRadioPanel();
 // upload problems are silent otherwise: the row simply would not change
 let tileNoteKey="";
 function tileNote(key){
@@ -4081,6 +4378,8 @@ applyTheme();
 resizeCanvas();
 UI.netStatus();
 render(null);
+Radio.init();
+Radio.restore();
 document.addEventListener("visibilitychange",()=>{
  if(!document.hidden){ if(UI.cur==="#v-lobby") UI.refreshRooms(); return; }
  if(!G || G.over) return;
