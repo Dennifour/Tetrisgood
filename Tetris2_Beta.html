@@ -2096,7 +2096,7 @@ function drawWell(g){
  }
  if(g.zoning){
   ctx.fillStyle="rgba(10,10,12,.5)"; ctx.fillRect(bx,by,bw,bh);   // lighter than game-over: this run has not ended
-  textFit(T("g_zone"),bx+bw/2,by+bh/2,TS(0.9),INK.fg,"center",600,TS(0.9)*0.16,bw*0.9);
+  textFit(EN("g_zone"),bx+bw/2,by+bh/2,TS(0.9),INK.fg,"center",600,TS(0.9)*0.16,bw*0.9);
   if(g.zoning.beat) textFit(T("go_best"),bx+bw/2,by+bh/2+TS(0.55),TS(0.42),INK.dim,"center",600,TS(0.42)*0.14,bw*0.9);
  }
 }
