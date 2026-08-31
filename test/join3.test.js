@@ -6,6 +6,10 @@
 const {chromium}=require("playwright");
 const {spawn}=require("child_process");
 const PORT=8734, BASE="http://localhost:"+PORT;
+// the page and the database on two different origins, the way Firebase always
+// is. same server, but the browser applies cross-origin rules -- which is what
+// hides the Date response header from JS
+const DB=(process.env.SAMEORIGIN?BASE:"http://127.0.0.1:"+PORT)+"/db";
 const HTML=process.argv[2]||__dirname+"/../Tetris2_Beta.html";
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let fails=0, checks=0;
@@ -22,8 +26,8 @@ const ok=(n,c,x)=>{checks++;c?console.log("  PASS  "+n):(fails++,console.log("  
   // skewMs shifts this page's whole clock, the way two real devices differ
   const mk=async (name,skewMs,lagMs)=>{
     const ctx=await browser.newContext({viewport:{width:1000,height:720}});
-    await ctx.addInitScript(([n,base,skew,lag])=>{
-      localStorage.setItem("tfx:fbUrl",JSON.stringify(base+"/db"));
+    await ctx.addInitScript(([n,db,skew,lag])=>{
+      localStorage.setItem("tfx:fbUrl",JSON.stringify(db));
       localStorage.setItem("tfx:name",JSON.stringify(n));
       localStorage.setItem("tfx:touch",JSON.stringify("off"));
       localStorage.setItem("tfx:touchSet",JSON.stringify(true));
@@ -33,7 +37,7 @@ const ok=(n,c,x)=>{checks++;c?console.log("  PASS  "+n):(fails++,console.log("  
         const f=window.fetch.bind(window);
         window.fetch=(u,o)=>new Promise(r=>setTimeout(()=>r(f(u,o)),lag));
       }
-    },[name,BASE,skewMs||0,lagMs||0]);
+    },[name,DB,skewMs||0,lagMs||0]);
     const p=await ctx.newPage();
     p.name=name;
     p.on("pageerror",e=>{ console.log("  !! pageerror ["+name+"] "+e.message); fails++; });
@@ -121,6 +125,52 @@ const ok=(n,c,x)=>{checks++;c?console.log("  PASS  "+n):(fails++,console.log("  
     await sleep(1500);
     ok("GINA sees EVE as a live seat",
       (await seatsOf(G1)||[]).some(x=>x.startsWith("EVE")&&!x.includes("STALE")),await seatsOf(G1));
+
+    sect("clocks hours apart, in both directions at once");
+    // the earlier ±45s cases only just cleared the 20s TTLs. real devices drift
+    // much further, and nothing in the protocol should care how far
+    const [G3,room4]=await host("KIRA");
+    const L1=await mk("LIAM",  3*3600*1000);
+    const M=await mk("MAYA", -5*3600*1000);
+    for(const p of [L1,M]) await toLobby(p);
+    const rl=await tapJoin(L1,room4), rm=await tapJoin(M,room4);
+    ok("a clock 3h fast still finds and enters the room",rl.listed&&rl.room,rl);
+    ok("a clock 5h slow still finds and enters the room",rm.listed&&rm.room,rm);
+    await sleep(1500);
+    for(const [nm,pg] of [["KIRA",G3],["LIAM",L1],["MAYA",M]])
+      ok(nm+" sees all three seats live",
+        (await seatsOf(pg)||[]).length===3 && !(await seatsOf(pg)).some(x=>x.includes("STALE")),
+        await seatsOf(pg));
+    // symptom 1: everyone readies and nothing happens, because the host never
+    // counts two fresh seats
+    for(const p of [G3,L1,M]) await p.click("#b-ready");
+    for(const p of [G3,L1,M])
+      await p.waitForFunction(()=>!!(G&&!G.over&&G.mode==="versus"&&COUNT===0),{timeout:25000}).catch(()=>{});
+    for(const [nm,pg] of [["KIRA",G3],["LIAM",L1],["MAYA",M]])
+      ok("the round started for "+nm,await pg.evaluate(()=>!!(G&&!G.over&&G.mode==="versus")),
+        await pg.evaluate(()=>({G:!!G,over:G&&G.over,seats:RoomClient.view().seats.map(x=>x.n+(x.fresh?"":"[STALE]")+(x.rdy?":R":""))})));
+    for(const p of [G3,L1,M]) await p.evaluate(()=>{G&&!G.over&&G.die();});
+    await sleep(2500);
+    for(const p of [G3,L1,M]){
+      if(await p.evaluate(()=>$("#game-over").classList.contains("on"))) await p.click("#go-menu");
+      await p.waitForFunction(()=>UI.cur==="#v-room",{timeout:12000}).catch(()=>{});
+    }
+
+    sect("symptom 2: chat from a badly skewed device");
+    const said=async (pg,txt)=>{
+      await pg.fill("#chat-in",txt);
+      await pg.press("#chat-in","Enter");
+    };
+    await said(G3,"from kira");
+    await said(L1,"from liam");
+    await said(M,"from maya");
+    await sleep(2000);
+    for(const [nm,pg] of [["KIRA",G3],["LIAM",L1],["MAYA",M]]){
+      const log=await pg.evaluate(()=>RoomClient.chat.map(m=>m.n+": "+m.m));
+      ok(nm+" sees all three messages",log.length===3,log);
+      ok(nm+" sees them in the order they were sent",
+        log.join("|")==="KIRA: from kira|LIAM: from liam|MAYA: from maya",log);
+    }
 
     sect("a third whose clock runs 45s behind the other two");
     const [G2,room3]=await host("IRIS");

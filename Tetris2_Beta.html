@@ -2576,22 +2576,15 @@ const Sig = {
  on(){ return /^https?:\/\/.+/i.test(this.base()); },
  url(p){ return this.base()+p+".json"; },
  sleep(ms){ return new Promise(r=>setTimeout(r,ms)); },
- // every room timestamp -- seat heartbeats, the lobby entry, chat keys -- used
- // to be written with the writer's own Date.now() and then compared against the
- // reader's. two devices whose clocks differ by more than SEAT_TTL therefore
- // read each other as long expired: the room vanished from the joiner's lobby
- // list, and a seat that did get in was invisible to everyone else. every
- // response carries a Date header, so the server's clock is free to track
- skew:0, synced:false,
- now(){ return Date.now()+this.skew; },
- // only needed before the very first write of a session; any response primes it
- async sync(){ if(!this.synced) try{ await this.req("/lobby",{cache:"no-store"},1); }catch(e){} },
- readClock(r){
-  const d=Date.parse(r.headers.get("date")||"");
-  if(!isFinite(d)) return;
-  this.skew=d-Date.now();
-  this.synced=true;
- },
+ // every shared timestamp -- seat heartbeats, the lobby entry, chat keys -- was
+ // written with the writer's own Date.now() and then compared against the
+ // reader's, so two devices whose clocks differ by more than the TTLs read each
+ // other as long expired: the room was missing from one joiner's lobby list,
+ // and a seat that did get in was invisible to everyone else, its ready never
+ // counted and its chat sorted off the top of the log. the server stamps them
+ // now, which is the one clock every client shares. (the Date response header
+ // is not CORS-readable, so it cannot stand in for it.)
+ stamp(){ return {".sv":"timestamp"}; },
  // retried and awaited: a lost write is what desynchronised the old room
  async req(path,opt,tries){
   const n=tries==null?SIG_TRIES:tries;
@@ -2600,7 +2593,6 @@ const Sig = {
    let r;
    try{ r=await fetch(this.url(path),opt); }
    catch(e){ last=new Error(T("e_fbnet")); await this.sleep(SIG_BASE_MS*(1<<i)+rnd(SIG_BASE_MS)); continue; }
-   this.readClock(r);
    if(r.status===412) return {conflict:true};
    if(r.status===401||r.status===403) throw new Error(T("e_fbauth",{p:path}));
    if(!r.ok){ last=new Error(T("e_fbnet")); await this.sleep(SIG_BASE_MS*(1<<i)+rnd(SIG_BASE_MS)); continue; }
@@ -2666,17 +2658,23 @@ const RoomState = {
   else if(ev.type==="patch" && n[last] && typeof n[last]==="object") Object.assign(n[last],ev.data);
   else n[last]=ev.data;
  },
- view(st,nowMs){
+ view(st){
   const t=st.tree||{};
   const meta=t.meta||{}, go=t.go||null, live=t.live||{};
-  const seats=Object.keys(t.seat||{}).map(pid=>{
+  const raw=Object.keys(t.seat||{}).map(pid=>{
    const r=t.seat[pid]||{};
    // ms timestamps overflow int32, so never |0 them
-   const hb=+r.hb||0;
-   return {pid, n:String(r.n||"").slice(0,12)||T("opponent"), j:+r.j||0, hb,
+   return {pid, n:String(r.n||"").slice(0,12)||T("opponent"), j:+r.j||0, hb:+r.hb||0,
        rdy:!!r.rdy, spec:!!r.spec, w:r.w|0, d:!!(live[pid]&&live[pid].o),
-       ms:+(live[pid]&&live[pid].ms)||0, fresh:(nowMs-hb)<SEAT_TTL};
-  }).sort((a,b)=>a.j-b.j||(a.pid<b.pid?-1:1));
+       ms:+(live[pid]&&live[pid].ms)||0};
+  });
+  // the yardstick is the room's own newest heartbeat, not this device's clock.
+  // every seat beats every HB_MS, so the newest is within one beat of server
+  // now, and a seat that stopped beating still ages out against the ones that
+  // did not -- which is the only thing freshness was ever for
+  const ref=raw.reduce((m,s)=>Math.max(m,s.hb),0);
+  const seats=raw.map(s=>Object.assign(s,{fresh:(ref-s.hb)<SEAT_TTL}))
+   .sort((a,b)=>a.j-b.j||(a.pid<b.pid?-1:1));
   const v={id:st.id||null, host:meta.h||null, rule:meta.r==="score"?"score":"attack",
       go, seats, live, roster:(go&&go.roster)||null, me:st.me};
   // fresh matters: a tab that closed without publishing a death used to count
@@ -2694,7 +2692,7 @@ const RoomState = {
 };
 const RoomClient = {
  id:null, on:false, st:null, sub:null, chatSub:null, hbTimer:null,
- chat:[], seen:new Set(), gseq:0, gtag:"", lastGo:0, starting:0,
+ chat:[], seen:new Set(), gseq:0, chatSeq:0, gtag:"", lastGo:0, starting:0,
  // the stream is the single source of truth for seat state, but it is a round
  // trip away, and until the echo lands the buttons still read the old seat.
  // that window was long enough to hit ready and then spectate into the very
@@ -2705,7 +2703,7 @@ const RoomClient = {
  settle(seat){ for(const k of Object.keys(this.pend)) if(!!(seat||{})[k]===!!this.pend[k]) delete this.pend[k]; },
  // the local seat as the buttons should read it: streamed, with the last click over it
  myIntent(v){ return Object.assign({rdy:false,spec:false},(v.seats.find(s=>s.pid===PID)||null),this.pend); },
- view(){ return RoomState.view(this.st||RoomState.make(PID), Sig.now()); },
+ view(){ return RoomState.view(this.st||RoomState.make(PID)); },
  // a go signal is in flight, or the round it announced has just begun
  busy(){ return !!this.starting && now()-this.starting<8000; },
  isHost(){ return this.on && this.view().host===PID; },
@@ -2715,15 +2713,18 @@ const RoomClient = {
  async listRooms(){
   if(!Sig.on()) throw new Error(T("e_nofb"));
   const idx=await Sig.get("/lobby")||{};
-  const t0=Sig.now();
-  return Object.keys(idx).filter(id=>t0-((idx[id]||{}).t||0)<LOBBY_TTL)
+  const ts=id=>+((idx[id]||{}).t)||0;
+  const ids=Object.keys(idx);
+  // as with seats: aged against the newest entry any client wrote, so a device
+  // whose own clock is off does not filter every live room out of its list
+  const ref=ids.reduce((m,id)=>Math.max(m,ts(id)),0);
+  return ids.filter(id=>ref-ts(id)<LOBBY_TTL)
    .map(id=>({id, name:String((idx[id]||{}).n||"").slice(0,12), count:(idx[id]||{}).c|0}));
  },
  async create(){
   if(!Sig.on()) throw new Error(T("e_nofb"));
   PID=PID||roomId(8);
-  await Sig.sync();                       // the host's own seat is the one everyone else ages
-  const id=roomId(6), t=Sig.now();
+  const id=roomId(6), t=Sig.stamp();
   NET_RULE="attack";
   await Sig.put("/rooms/"+id,{meta:{h:PID,r:"attack"}, seat:{[PID]:{n:CFG.name,j:t,hb:t,w:0}}});
   await Sig.put("/lobby/"+id,{n:CFG.name,t,c:1});
@@ -2735,11 +2736,13 @@ const RoomClient = {
   PID=PID||roomId(8);
   const v=await Sig.get("/rooms/"+id);
   if(!v||!v.meta) throw new Error(T("e_noroom"));
-  const t=Sig.now();
+  const t=Sig.stamp();
   // cas closes the check-then-act race the old seat count had
   const seat=await Sig.cas("/rooms/"+id+"/seat",cur=>{
    const m=cur||{};
-   const live=Object.keys(m).filter(k=>t-((m[k]||{}).hb||0)<SEAT_TTL);
+   const hb=k=>+((m[k]||{}).hb)||0;
+   const ref=Object.keys(m).reduce((x,k)=>Math.max(x,hb(k)),0);
+   const live=Object.keys(m).filter(k=>ref-hb(k)<SEAT_TTL);
    if(live.length>=MAX_SEATS && !m[PID]) return m;
    return Object.assign({},m,{[PID]:{n:CFG.name,j:t,hb:t,w:0}});
   });
@@ -2750,7 +2753,7 @@ const RoomClient = {
  begin(id){
   this.id=id; this.on=true;
   this.st=RoomState.make(PID); this.st.id=id;
-  this.chat=[]; this.seen=new Set(); this.gseq=0; this.lastGo=0; this.starting=0; this.pend={};
+  this.chat=[]; this.seen=new Set(); this.gseq=0; this.chatSeq=0; this.lastGo=0; this.starting=0; this.pend={};
   this.gtag=Date.now().toString(36);
   this.sub=Sig.stream(this.path(),ev=>this.onEvent(ev),()=>UI.streamDead());
   this.openChat(id);
@@ -2805,7 +2808,7 @@ const RoomClient = {
   // began. undelivered attacks from the finished round go with them
   await Sig.del(this.path()+"/live");
   await Sig.del(this.path()+"/gb");
-  await Sig.put(this.path()+"/go",{s:((Math.random()*0xffffffff)>>>0)||1, r:NET_RULE, at:Sig.now(), roster});
+  await Sig.put(this.path()+"/go",{s:((Math.random()*0xffffffff)>>>0)||1, r:NET_RULE, at:Sig.stamp(), roster});
  },
  onRound(v){
   if(!this.isHost() && !this.busy()) NET_RULE=v.rule;
@@ -2855,21 +2858,28 @@ const RoomClient = {
    UI.renderChat();
   });
  },
- chatMap(){ const o={}; for(const m of this.chat) o[m.key]={n:m.n,m:m.m}; return o; },
+ chatMap(){ const o={}; for(const m of this.chat) o[m.key]={n:m.n,m:m.m,at:m.at}; return o; },
+ // ordered by the stamp the server put on each message. sorting on the key
+ // meant sorting on the sender's own clock: a device hours behind had its
+ // messages sorted off the top of a log that is scrolled to the bottom, which
+ // looks exactly like a message that was never sent
  foldChat(c){
-  return Object.keys(c).sort((a,b)=>parseInt(a,10)-parseInt(b,10)||(a<b?-1:1))
-   .slice(-CHAT_KEEP)
-   .map(k=>({key:k, n:String((c[k]||{}).n||"").slice(0,12), m:String((c[k]||{}).m||"").slice(0,120)}));
+  return Object.keys(c)
+   .map(k=>({key:k, at:+((c[k]||{}).at)||0,
+        n:String((c[k]||{}).n||"").slice(0,12), m:String((c[k]||{}).m||"").slice(0,120)}))
+   .sort((a,b)=>a.at-b.at||(a.key<b.key?-1:1))
+   .slice(-CHAT_KEEP);
  },
  async say(text){
   if(!this.on) return;
   const t=String(text).slice(0,120);
   if(!t.trim()) return;
-  await Sig.put("/chat/"+this.id+"/"+(Sig.now()+"-"+PID),{n:CFG.name,m:t});   // the log is sorted on this key
+  // the key only has to be unique now, so it needs no clock either
+  await Sig.put("/chat/"+this.id+"/"+PID+"-"+(++this.chatSeq),{n:CFG.name,m:t,at:Sig.stamp()});
  },
  async beat(){
   if(!this.on) return;
-  const t=Sig.now();
+  const t=Sig.stamp();
   try{
    await Sig.patch(this.mine(),{hb:t});
    const n=this.view().seats.filter(s=>s.fresh).length||1;
@@ -2890,10 +2900,11 @@ const RoomClient = {
    await Sig.del("/rooms/"+id+"/live/"+PID);
    await Sig.del("/rooms/"+id+"/gb/"+PID);   // else it is waiting to bury you on your next visit
    // re-read rather than trust the last snapshot: two players can leave at once
-   const left=await Sig.get("/rooms/"+id+"/seat");
-   const t=Sig.now();
-   const live=Object.keys(left||{}).filter(k=>t-((left[k]||{}).hb||0)<SEAT_TTL);
-   if(live.length){ await Sig.patch("/lobby/"+id,{t,c:live.length}); return; }
+   const left=await Sig.get("/rooms/"+id+"/seat")||{};
+   const hb=k=>+((left[k]||{}).hb)||0;
+   const ref=Object.keys(left).reduce((x,k)=>Math.max(x,hb(k)),0);
+   const live=Object.keys(left).filter(k=>ref-hb(k)<SEAT_TTL);
+   if(live.length){ await Sig.patch("/lobby/"+id,{t:Sig.stamp(),c:live.length}); return; }
    await Sig.del("/rooms/"+id);
    await Sig.del("/lobby/"+id);
    await Sig.del("/chat/"+id);

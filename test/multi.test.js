@@ -6,6 +6,8 @@
 const {chromium}=require("playwright");
 const {spawn}=require("child_process");
 const PORT=8732, BASE="http://localhost:"+PORT;
+// the database on a second origin, the way Firebase always is
+const DB="http://127.0.0.1:"+PORT+"/db";
 const HTML=process.argv[2]||__dirname+"/../Tetris2_Beta.html";
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let fails=0, checks=0;
@@ -24,13 +26,13 @@ function ok(name,cond,extra){
     args:["--disable-background-timer-throttling","--disable-backgrounding-occluded-windows","--disable-renderer-backgrounding"]});
   const mk=async name=>{
     const ctx=await browser.newContext({viewport:{width:1280,height:760}});
-    await ctx.addInitScript(([n,base])=>{
-      localStorage.setItem("tfx:fbUrl",JSON.stringify(base+"/db"));
+    await ctx.addInitScript(([n,db])=>{
+      localStorage.setItem("tfx:fbUrl",JSON.stringify(db));
       localStorage.setItem("tfx:name",JSON.stringify(n));
       localStorage.setItem("tfx:touch",JSON.stringify("off"));
       localStorage.setItem("tfx:touchSet",JSON.stringify(true));
       localStorage.setItem("tfx:lang",JSON.stringify("en"));
-    },[name,BASE]);
+    },[name,DB]);
     const p=await ctx.newPage();
     p.name=name;
     p.on("pageerror",e=>{ console.log("  !! pageerror ["+name+"] "+e.message); fails++; });
