@@ -2541,6 +2541,12 @@ function startMatch(){
  // on last-man-standing, but you could still come out top of the pending sort
  // and take a round you were never part of
  const spectating=!!(meSeat&&meSeat.spec) || !!(rv && rv.roster && !RoomState.inRound(rv,PID));
+ // caught by a roster that froze before the spectate flag reached the host.
+ // nobody else can see that, so to them this seat is alive and never dies: the
+ // round has no last man standing, the losers wait out the tie cap and the
+ // attacks addressed here are swallowed by a well that never opens. forfeit it
+ if(RoomClient.on && spectating && meSeat && meSeat.spec && rv.roster && RoomState.inRound(rv,PID))
+  RoomClient.publishDeath(1).catch(()=>{});
  if(RoomClient.on){
   // /live and /gb are wiped by the host in callStart(), before the go event
   // that got us here: deleting this seat's own /live from here instead raced
@@ -2583,6 +2589,11 @@ function loop(t){
  rafId=requestAnimationFrame(loop);
  const dt=Math.min(64, t-lastT||16); lastT=t;
  if(G){
+  // a well can end during the countdown -- dropOut() fires the moment the tab
+  // is hidden -- and the countdown only ever drained while the well was live,
+  // so COUNT stayed above zero and resolveRound(), which waits it out, never
+  // ran again: no result card, ever, for the player it happened to
+  if(G.over && COUNT>0){ COUNT=0; startHoldEnd=0; }
   if(COUNT>0 && !G.over){
    if(G.paused) countEnd=now()+COUNT*1000;
    else{
@@ -2824,11 +2835,26 @@ function waitIceGatheringComplete(pc){
 }
 const HB_MS=5000, SEAT_TTL=20000, LOBBY_TTL=20000, SIG_TRIES=4, SIG_BASE_MS=120,
    LEAVE_TIMEOUT_MS=2500;
+// the fallback transport: how often a subscription re-reads its node when the
+// event stream is not delivering, how long a silent stream is given before the
+// polling starts, how many times the socket is retried, and how many failed
+// reads in a row mean the node is genuinely gone rather than the link flaky
+const ROOM_POLL_MS=700, CHAT_POLL_MS=1600, STREAM_WARMUP_MS=3000,
+   STREAM_TRIES=3, POLL_FAILS=6;
 const Sig = {
  base(){ return (CFG.fbUrl||"").trim().replace(/\/+$/,""); },
  on(){ return /^https?:\/\/.+/i.test(this.base()); },
  url(p){ return this.base()+p+".json"; },
  sleep(ms){ return new Promise(r=>setTimeout(r,ms)); },
+ // every shared timestamp -- seat heartbeats, the lobby entry, chat keys -- was
+ // written with the writer's own Date.now() and then compared against the
+ // reader's, so two devices whose clocks differ by more than the TTLs read each
+ // other as long expired: the room was missing from one joiner's lobby list,
+ // and a seat that did get in was invisible to everyone else, its ready never
+ // counted and its chat sorted off the top of the log. the server stamps them
+ // now, which is the one clock every client shares. (the Date response header
+ // is not CORS-readable, so it cannot stand in for it.)
+ stamp(){ return {".sv":"timestamp"}; },
  // retried and awaited: a lost write is what desynchronised the old room
  async req(path,opt,tries){
   const n=tries==null?SIG_TRIES:tries;
@@ -2862,31 +2888,68 @@ const Sig = {
   }
   throw new Error(T("e_fbnet"));
  },
- stream(path,onEvent,onDead){
-  let es=null, closed=false, back=0;
+ // Seats, ready, every opponent's board and the whole chat log reach a client
+ // through here and nowhere else, so one socket that never connects looks like
+ // three unrelated bugs: an empty seat list, a READY button that stays disabled
+ // because it can see fewer than two players, and chat that appears to send and
+ // never arrive. EventSource used to be the only way in, and a connection that
+ // could not be made just retried for ever without a word. It is not a given:
+ // a database's REST streaming endpoint may not be reachable from a browser at
+ // all even while its ordinary REST calls are fine -- Firebase's own SDK uses
+ // websockets rather than this endpoint. So the stream is now an optimisation,
+ // and re-reading the node over those same ordinary REST calls is the floor.
+ polling:0,
+ stream(path,onEvent,onDead,pollMs){
+  let es=null, closed=false, tries=0, poll=0, warm=0, bad=0, got=false;
+  const clearWarm=()=>{ if(warm){ clearTimeout(warm); warm=0; } };
+  const drop=()=>{ try{ es&&es.close(); }catch(e){} es=null; };
+  const stopPoll=()=>{ if(poll){ clearInterval(poll); poll=0; Sig.polling=Math.max(0,Sig.polling-1); } };
+  // a whole-node re-read is the same shape as the snapshot a stream opens with,
+  // so it lands in the one state writer unchanged
+  const tick=()=>{
+   if(closed) return;
+   this.get(path).then(d=>{ bad=0; if(!closed) onEvent({type:"put", path:"/", data:d}); },
+    ()=>{ if(++bad>=POLL_FAILS && !closed){ closed=true; stopPoll(); drop(); if(onDead) onDead("poll"); } });
+  };
+  const startPoll=()=>{
+   if(closed||poll) return;
+   Sig.polling++;
+   poll=setInterval(tick,pollMs||ROOM_POLL_MS);
+   tick();
+  };
   const open=()=>{
    if(closed) return;
    es=new EventSource(this.url(path));
    const on=type=>es.addEventListener(type,m=>{
-    back=0;
     let d=null;
     try{ d=JSON.parse(m.data); }catch(e){ return; }
-    if(d) onEvent({type, path:String(d.path||"/"), data:d.data});
+    if(!d) return;
+    // it is delivering after all, so the polling covering for it can stand down
+    got=true; tries=0; clearWarm(); stopPoll();
+    onEvent({type, path:String(d.path||"/"), data:d.data});
    });
    on("put"); on("patch");
    // the server ends the stream with one of these; unhandled, a read the rules
    // deny left the client sitting in a room that silently never updated again
    const dead=type=>es.addEventListener(type,()=>{
-    closed=true; try{ es.close(); }catch(e){}
+    closed=true; clearWarm(); stopPoll(); drop();
     if(onDead) onDead(type);
    });
    dead("cancel"); dead("auth_revoked");
-   // back drives a shift, so it has to be capped: 1<<31 is negative and takes
-   // the retry delay with it, spinning reconnects as fast as the browser allows
-   es.onerror=()=>{ try{ es.close(); }catch(e){} if(closed) return; setTimeout(open,Math.min(4000,SIG_BASE_MS*(1<<Math.min(back++,6)))); };
+   es.onerror=()=>{
+    drop();
+    if(closed) return;
+    startPoll();                       // cover the gap before deciding to retry
+    // tries drives a shift, so it has to be capped: 1<<31 is negative and takes
+    // the retry delay with it, spinning reconnects as fast as the browser allows
+    if(++tries<=STREAM_TRIES) setTimeout(open,Math.min(4000,SIG_BASE_MS*(1<<Math.min(tries,6))));
+   };
+   // and a socket can also connect and then say nothing at all
+   clearWarm();
+   warm=setTimeout(()=>{ warm=0; if(!got) startPoll(); },STREAM_WARMUP_MS);
   };
   open();
-  return { close(){ closed=true; try{ es&&es.close(); }catch(e){} } };
+  return { close(){ closed=true; clearWarm(); stopPoll(); drop(); } };
  }
 };
 // one writer for room state: the old object was mutated from six paths
@@ -2902,17 +2965,23 @@ const RoomState = {
   else if(ev.type==="patch" && n[last] && typeof n[last]==="object") Object.assign(n[last],ev.data);
   else n[last]=ev.data;
  },
- view(st,nowMs){
+ view(st){
   const t=st.tree||{};
   const meta=t.meta||{}, go=t.go||null, live=t.live||{};
-  const seats=Object.keys(t.seat||{}).map(pid=>{
+  const raw=Object.keys(t.seat||{}).map(pid=>{
    const r=t.seat[pid]||{};
    // ms timestamps overflow int32, so never |0 them
-   const hb=+r.hb||0;
-   return {pid, n:String(r.n||"").slice(0,12)||T("opponent"), j:+r.j||0, hb,
+   return {pid, n:String(r.n||"").slice(0,12)||T("opponent"), j:+r.j||0, hb:+r.hb||0,
        rdy:!!r.rdy, spec:!!r.spec, w:r.w|0, d:!!(live[pid]&&live[pid].o),
-       ms:+(live[pid]&&live[pid].ms)||0, fresh:(nowMs-hb)<SEAT_TTL};
-  }).sort((a,b)=>a.j-b.j||(a.pid<b.pid?-1:1));
+       ms:+(live[pid]&&live[pid].ms)||0};
+  });
+  // the yardstick is the room's own newest heartbeat, not this device's clock.
+  // every seat beats every HB_MS, so the newest is within one beat of server
+  // now, and a seat that stopped beating still ages out against the ones that
+  // did not -- which is the only thing freshness was ever for
+  const ref=raw.reduce((m,s)=>Math.max(m,s.hb),0);
+  const seats=raw.map(s=>Object.assign(s,{fresh:(ref-s.hb)<SEAT_TTL}))
+   .sort((a,b)=>a.j-b.j||(a.pid<b.pid?-1:1));
   const v={id:st.id||null, host:meta.h||null, rule:meta.r==="score"?"score":"attack",
       go, seats, live, roster:(go&&go.roster)||null, me:st.me};
   // fresh matters: a tab that closed without publishing a death used to count
@@ -2930,8 +2999,18 @@ const RoomState = {
 };
 const RoomClient = {
  id:null, on:false, st:null, sub:null, chatSub:null, hbTimer:null,
- chat:[], seen:new Set(), gseq:0, gtag:"", lastGo:0, starting:0,
- view(){ return RoomState.view(this.st||RoomState.make(PID), Date.now()); },
+ chat:[], seen:new Set(), gseq:0, chatSeq:0, gtag:"", lastGo:0, starting:0,
+ // the stream is the single source of truth for seat state, but it is a round
+ // trip away, and until the echo lands the buttons still read the old seat.
+ // that window was long enough to hit ready and then spectate into the very
+ // round the ready had just called, so the click is held here meanwhile
+ pend:{},
+ intend(o){ Object.assign(this.pend,o); UI.renderRoom(); },
+ // whatever the stream has caught up on is no longer pending
+ settle(seat){ for(const k of Object.keys(this.pend)) if(!!(seat||{})[k]===!!this.pend[k]) delete this.pend[k]; },
+ // the local seat as the buttons should read it: streamed, with the last click over it
+ myIntent(v){ return Object.assign({rdy:false,spec:false},(v.seats.find(s=>s.pid===PID)||null),this.pend); },
+ view(){ return RoomState.view(this.st||RoomState.make(PID)); },
  // a go signal is in flight, or the round it announced has just begun
  busy(){ return !!this.starting && now()-this.starting<8000; },
  isHost(){ return this.on && this.view().host===PID; },
@@ -2941,14 +3020,18 @@ const RoomClient = {
  async listRooms(){
   if(!Sig.on()) throw new Error(T("e_nofb"));
   const idx=await Sig.get("/lobby")||{};
-  const t0=Date.now();
-  return Object.keys(idx).filter(id=>t0-((idx[id]||{}).t||0)<LOBBY_TTL)
+  const ts=id=>+((idx[id]||{}).t)||0;
+  const ids=Object.keys(idx);
+  // as with seats: aged against the newest entry any client wrote, so a device
+  // whose own clock is off does not filter every live room out of its list
+  const ref=ids.reduce((m,id)=>Math.max(m,ts(id)),0);
+  return ids.filter(id=>ref-ts(id)<LOBBY_TTL)
    .map(id=>({id, name:String((idx[id]||{}).n||"").slice(0,12), count:(idx[id]||{}).c|0}));
  },
  async create(){
   if(!Sig.on()) throw new Error(T("e_nofb"));
   PID=PID||roomId(8);
-  const id=roomId(6), t=Date.now();
+  const id=roomId(6), t=Sig.stamp();
   NET_RULE="attack";
   await Sig.put("/rooms/"+id,{meta:{h:PID,r:"attack"}, seat:{[PID]:{n:CFG.name,j:t,hb:t,w:0}}});
   await Sig.put("/lobby/"+id,{n:CFG.name,t,c:1});
@@ -2960,11 +3043,13 @@ const RoomClient = {
   PID=PID||roomId(8);
   const v=await Sig.get("/rooms/"+id);
   if(!v||!v.meta) throw new Error(T("e_noroom"));
-  const t=Date.now();
+  const t=Sig.stamp();
   // cas closes the check-then-act race the old seat count had
   const seat=await Sig.cas("/rooms/"+id+"/seat",cur=>{
    const m=cur||{};
-   const live=Object.keys(m).filter(k=>t-((m[k]||{}).hb||0)<SEAT_TTL);
+   const hb=k=>+((m[k]||{}).hb)||0;
+   const ref=Object.keys(m).reduce((x,k)=>Math.max(x,hb(k)),0);
+   const live=Object.keys(m).filter(k=>ref-hb(k)<SEAT_TTL);
    if(live.length>=MAX_SEATS && !m[PID]) return m;
    return Object.assign({},m,{[PID]:{n:CFG.name,j:t,hb:t,w:0}});
   });
@@ -2975,7 +3060,7 @@ const RoomClient = {
  begin(id){
   this.id=id; this.on=true;
   this.st=RoomState.make(PID); this.st.id=id;
-  this.chat=[]; this.seen=new Set(); this.gseq=0; this.lastGo=0; this.starting=0;
+  this.chat=[]; this.seen=new Set(); this.gseq=0; this.chatSeq=0; this.lastGo=0; this.starting=0; this.pend={};
   this.gtag=Date.now().toString(36);
   this.sub=Sig.stream(this.path(),ev=>this.onEvent(ev),()=>UI.streamDead());
   this.openChat(id);
@@ -2985,12 +3070,20 @@ const RoomClient = {
   if(!this.on) return;
   RoomState.apply(this.st,ev);
   const v=this.view();
-  if(!v.seats.some(s=>s.pid===PID)){ UI.roomGone(); return; }
+  const mine=v.seats.find(s=>s.pid===PID);
+  if(!mine){ UI.roomGone(); return; }
+  this.settle(mine);
   this.onRound(v);
   UI.renderRoom();
  },
- async setReady(v){ if(this.on) await Sig.patch(this.mine(),{rdy:!!v}); },
- async setSpectating(v){ if(this.on) await Sig.patch(this.mine(),{spec:!!v, rdy:false}); },
+ async setReady(v){ return this.claim({rdy:!!v}); },
+ async setSpectating(v){ return this.claim({spec:!!v, rdy:false}); },
+ async claim(o){
+  if(!this.on) return;
+  this.intend(o);
+  try{ await Sig.patch(this.mine(),o); }
+  catch(e){ for(const k of Object.keys(o)) delete this.pend[k]; UI.renderRoom(); throw e; }
+ },
  async setRule(r){ if(this.isHost()) await Sig.patch(this.path()+"/meta",{r:r==="score"?"score":"attack"}); },
  async publishBoard(b){ if(this.on) await Sig.patch(this.path()+"/live/"+PID,b); },
  async publishDeath(ms){ if(this.on) await Sig.patch(this.path()+"/live/"+PID,{o:1,ms:ms|0}); },
@@ -3022,7 +3115,7 @@ const RoomClient = {
   // began. undelivered attacks from the finished round go with them
   await Sig.del(this.path()+"/live");
   await Sig.del(this.path()+"/gb");
-  await Sig.put(this.path()+"/go",{s:((Math.random()*0xffffffff)>>>0)||1, r:NET_RULE, at:Date.now(), roster});
+  await Sig.put(this.path()+"/go",{s:((Math.random()*0xffffffff)>>>0)||1, r:NET_RULE, at:Sig.stamp(), roster});
  },
  onRound(v){
   if(!this.isHost() && !this.busy()) NET_RULE=v.rule;
@@ -3030,6 +3123,7 @@ const RoomClient = {
    this.lastGo=v.go.at;
    NET_SEED=v.go.s>>>0;
    NET_RULE=v.go.r==="score"?"score":"attack";
+   this.pend={};
    startMatch();
    // after the call, not before: startGame() used to zero this the moment it
    // was set, so a spectating host (whose G is over on arrival) walked straight
@@ -3069,23 +3163,30 @@ const RoomClient = {
     this.chat=this.foldChat(m);
    }
    UI.renderChat();
-  });
+  },null,CHAT_POLL_MS);   // chat can lag the room a little when it is polled
  },
- chatMap(){ const o={}; for(const m of this.chat) o[m.key]={n:m.n,m:m.m}; return o; },
+ chatMap(){ const o={}; for(const m of this.chat) o[m.key]={n:m.n,m:m.m,at:m.at}; return o; },
+ // ordered by the stamp the server put on each message. sorting on the key
+ // meant sorting on the sender's own clock: a device hours behind had its
+ // messages sorted off the top of a log that is scrolled to the bottom, which
+ // looks exactly like a message that was never sent
  foldChat(c){
-  return Object.keys(c).sort((a,b)=>parseInt(a,10)-parseInt(b,10)||(a<b?-1:1))
-   .slice(-CHAT_KEEP)
-   .map(k=>({key:k, n:String((c[k]||{}).n||"").slice(0,12), m:String((c[k]||{}).m||"").slice(0,120)}));
+  return Object.keys(c)
+   .map(k=>({key:k, at:+((c[k]||{}).at)||0,
+        n:String((c[k]||{}).n||"").slice(0,12), m:String((c[k]||{}).m||"").slice(0,120)}))
+   .sort((a,b)=>a.at-b.at||(a.key<b.key?-1:1))
+   .slice(-CHAT_KEEP);
  },
  async say(text){
   if(!this.on) return;
   const t=String(text).slice(0,120);
   if(!t.trim()) return;
-  await Sig.put("/chat/"+this.id+"/"+(Date.now()+"-"+PID),{n:CFG.name,m:t});
+  // the key only has to be unique now, so it needs no clock either
+  await Sig.put("/chat/"+this.id+"/"+PID+"-"+(++this.chatSeq),{n:CFG.name,m:t,at:Sig.stamp()});
  },
  async beat(){
   if(!this.on) return;
-  const t=Date.now();
+  const t=Sig.stamp();
   try{
    await Sig.patch(this.mine(),{hb:t});
    const n=this.view().seats.filter(s=>s.fresh).length||1;
@@ -3106,10 +3207,11 @@ const RoomClient = {
    await Sig.del("/rooms/"+id+"/live/"+PID);
    await Sig.del("/rooms/"+id+"/gb/"+PID);   // else it is waiting to bury you on your next visit
    // re-read rather than trust the last snapshot: two players can leave at once
-   const left=await Sig.get("/rooms/"+id+"/seat");
-   const t=Date.now();
-   const live=Object.keys(left||{}).filter(k=>t-((left[k]||{}).hb||0)<SEAT_TTL);
-   if(live.length){ await Sig.patch("/lobby/"+id,{t,c:live.length}); return; }
+   const left=await Sig.get("/rooms/"+id+"/seat")||{};
+   const hb=k=>+((left[k]||{}).hb)||0;
+   const ref=Object.keys(left).reduce((x,k)=>Math.max(x,hb(k)),0);
+   const live=Object.keys(left).filter(k=>ref-hb(k)<SEAT_TTL);
+   if(live.length){ await Sig.patch("/lobby/"+id,{t:Sig.stamp(),c:live.length}); return; }
    await Sig.del("/rooms/"+id);
    await Sig.del("/lobby/"+id);
    await Sig.del("/chat/"+id);
@@ -3125,10 +3227,12 @@ const RoomView = {
   const inRoom=!!v;
   // stale seats kept a crashed player on the list forever, and counted toward
   // the two that enable Ready, while the host only ever starts on fresh ones
-  const players=inRoom ? v.seats.filter(s=>s.fresh||s.pid===PID).map(s=>({
-    pid:s.pid, n:s.n, rdy:s.rdy, spec:s.spec, w:s.w,
-    battling:!!v.roster && !s.spec && !s.d && RoomState.inRound(v,s.pid)
-   }))
+  const players=inRoom ? v.seats.filter(s=>s.fresh||s.pid===PID).map(s=>{
+    // your own click counts against your own row while its echo is in flight
+    const m=s.pid===PID?Object.assign({},s,RoomClient.pend):s;
+    return {pid:s.pid, n:s.n, rdy:m.rdy, spec:m.spec, w:s.w,
+        battling:!!v.roster && !m.spec && !s.d && RoomState.inRound(v,s.pid)};
+   })
    :(Net.ready()?[{pid:PID,n:CFG.name,rdy:READY_P2P.me,w:WINS_P2P.me,battling:false},
            {pid:"peer",n:Net.peerName||T("opponent"),rdy:READY_P2P.peer,w:WINS_P2P.peer,battling:false}]:[]);
   const active=players.filter(p=>!p.spec);
@@ -3147,10 +3251,14 @@ const RoomView = {
    host.innerHTML=rows.length?rows.join(""):'<p class="empty">'+esc(T("room_empty"))+'</p>';
   }
   const mySpec=!!(me&&me.spec);
+  const myRdy=!!(me&&me.rdy);
   const btn=$("#b-ready");
-  if(btn){ btn.textContent=T(mySpec?"room_ready":(me&&me.rdy?"room_unready":"room_ready")); btn.classList.toggle("ready",!!(me&&me.rdy)); btn.disabled=active.length<2||mySpec; }
+  if(btn){ btn.textContent=T(mySpec?"room_ready":(myRdy?"room_unready":"room_ready")); btn.classList.toggle("ready",myRdy); btn.disabled=active.length<2||mySpec; }
   const specBtn=$("#b-spectate");
   if(specBtn){
+   // ready is a commitment: the host can freeze the roster around it at any
+   // moment, so the way out of the round is to un-ready, not to slip past it
+   specBtn.disabled=myRdy;
    // offered for as long as you are in a room. gating it on a live match was
    // circular: startMatch() reads the flag at the go signal, so the only window
    // the button existed in was the one where setting it changed nothing
@@ -3503,13 +3611,18 @@ const UI = {
   if(!list) return;
   try{
    const rooms=await RoomClient.listRooms();
+   // this re-lists every 3s. rebuilding an unchanged list replaced the very
+   // button the finger was already down on, and the tap landed on nothing
+   const sig=CFG.lang+":"+JSON.stringify(rooms);
+   if(sig===this._roomSig) return;
+   this._roomSig=sig;
    list.classList.toggle("has-rooms",!!rooms.length);
    if(!rooms.length){ list.innerHTML='<p class="diag" id="on-none">'+esc(T("on_none"))+'</p>'; return; }
    list.innerHTML=rooms.map(r=>
     '<button class="room-row" data-room="'+esc(r.id)+'"><span class="nm">'+esc(r.name||T("opponent"))+
     '</span><span class="sub">'+esc(T("on_seats",{n:r.count||1,max:MAX_SEATS}))+'</span></button>').join("");
    list.querySelectorAll("[data-room]").forEach(b=>b.onclick=()=>this.doJoinRoom(b.dataset.room));
-  }catch(e){ this.err("#srv-hint",e.message,true); }
+  }catch(e){ this._roomSig=null; this.err("#srv-hint",e.message,true); }
  },
  async doMakeRoom(){
   Net.reset();
@@ -3847,14 +3960,17 @@ $("#j-go").onclick=()=>UI.doAnswer();
 $("#j-copy").onclick=()=>UI.copy("#j-out","#j-hint");
 $("#h-in").addEventListener("paste",()=>setTimeout(()=>UI.doAccept(),60));
 $("#j-in").addEventListener("paste",()=>setTimeout(()=>UI.doAnswer(),60));
-const mySeat=()=>RoomClient.on?(RoomClient.view().seats.find(s=>s.pid===PID)||null):null;
+// what the buttons toggle is what they show: the seat as streamed, with a
+// click whose echo has not come back yet laid over it
 $("#b-ready").onclick=()=>{
- const m=mySeat();
- UI.setReady(!(RoomClient.on?!!(m&&m.rdy):READY_P2P.me));
+ if(RoomClient.on){ UI.setReady(!RoomClient.myIntent(RoomClient.view()).rdy); return; }
+ UI.setReady(!READY_P2P.me);
 };
 $("#b-spectate").onclick=()=>{
- const m=mySeat();
- UI.setSpectating(!(m&&m.spec));
+ if(!RoomClient.on) return;
+ const me=RoomClient.myIntent(RoomClient.view());
+ if(me.rdy) return;              // un-ready first; see the button's own gate
+ UI.setSpectating(!me.spec);
 };
 $$(".rule").forEach(b=>b.onclick=()=>{ ; UI.setRule(b.dataset.rule); });
 $("#b-leave").onclick=()=>{ ; UI.leaveRoom(); };
