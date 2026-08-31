@@ -339,6 +339,10 @@ html[lang=ko] .fold summary h3{letter-spacing:.02em}
    <button class="mi nav" data-go="versus"><span data-i18n="m_versus"></span></button>
    <button class="mi nav" data-go="records"><span data-i18n="m_records"></span></button>
   </div>
+  <div class="opts mt16">
+   <div class="sp"><span data-i18n="m_zone"></span><button type="button" role="switch" aria-checked="false" class="sw" id="s-zonemode"></button></div>
+  </div>
+  <p class="hint" data-i18n="m_zone_hint"></p>
   <div class="menu mt16"><button class="mi nav ghost" data-back="1" data-i18n="back"></button></div>
  </div>
 </div>
@@ -609,6 +613,7 @@ const CFG = {
  vol:   store.get("vol",100),
  radioOn:  store.get("radioOn",true),
  radioVol: store.get("radioVol",70),
+ zoneMode: store.get("zoneMode",false),
  bob:   store.get("bob", store.get("shake",true)),
  ghost: store.get("ghost",true),
  grid:  store.get("grid",false),
@@ -906,6 +911,9 @@ const I18N = {
  set_sig_hint:["Firebase Realtime Database URL. It carries the room list and the match itself, so you can play on networks that block a direct link. Swapping codes by hand never touches it.","Firebase 실시간 데이터베이스 주소. 방 목록과 경기 자체를 전달하므로 직접 연결이 막힌 네트워크에서도 플레이할 수 있습니다. 코드를 직접 주고받는 방식은 이 주소를 사용하지 않습니다."],
  set_sound:["Sound","소리"],
  set_sound_hint:["To be updated.","추후 업데이트 예정입니다."],
+ m_zone:["Zone mode","존 모드"],
+ m_zone_hint:["Marathon only. Top out and the board dissolves into dust instead of ending the run -- your score is banked first, then it resets and play goes on.","마라톤 전용입니다. 탑아웃하면 게임이 끝나는 대신 보드가 먼지가 되어 사라집니다 -- 점수가 먼저 기록된 뒤 초기화되고 게임은 계속됩니다."],
+ g_zone:["ZONE","존"],
  set_radio:["Marathon radio","마라톤 라디오"],
  set_radio_hint:["Point it at a folder of your own music and it plays in the background during Marathon, shuffled fresh each run.","좋아하는 음악이 담긴 폴더를 선택하면 마라톤 플레이 중 배경음악으로 재생됩니다. 매 판마다 새로 섞입니다."],
  set_radio_on:["Play music in Marathon","마라톤에서 음악 재생"],
@@ -1384,6 +1392,10 @@ class Game {
   this.over=false; this.won=false; this.paused=false; this.spectating=false;
   this.stranded=false; this.watched=false;
   this.radioArmed=true;
+  // Marathon only: a topout dissolves the board and resets score instead of
+  // ending the run. null when not in the middle of that reset
+  this.zone = mode==="solo" && !!CFG.zoneMode;
+  this.zoning = null;
   this.resolved=false; this.pending=false; this.pendingAt=0;
   this.startedAt=now(); this.endedAt=0;
   this.pieceCount=0;
@@ -1598,13 +1610,74 @@ class Game {
   }
   this.events.push({e:"garbage",lines:total});
  }
- die(){ if(this.over) return; this.over=true; this.clearing=null; this.endedAt=now(); this.events.push({e:"dead"}); ; }
+ die(){
+  if(this.over||this.zoning) return;
+  if(this.zone){ this.beginZoning(); return; }
+  this.over=true; this.clearing=null; this.endedAt=now(); this.events.push({e:"dead"});
+ }
+ // credited before the board is wiped -- Zone's run never reaches the normal
+ // game-over path, so a topout here is the only moment the score can count
+ beginZoning(){
+  const beat=noteRun(this,false,0);
+  const cells=[];
+  for(let y=BUFFER;y<ROWS;y++) for(let x=0;x<COLS;x++){
+   const c=this.board[y][x];
+   if(c) cells.push({x, y:y-BUFFER, t:c});
+  }
+  // the piece that caused the topout is still `cur`, never baked into the
+  // board (spawn's collision) or only partly baked into it (lock's overflow)
+  if(this.cur) for(const [cx,cy] of this.cells(this.cur.x,this.cur.y,this.cur.r))
+   if(cy>=BUFFER) cells.push({x:cx, y:cy-BUFFER, t:this.cur.t});
+  this.clearing=null;
+  this.zoning={phase:"hold", t:0, cells, particles:[], beat};
+  this.events.push({e:"zoneout",beat});
+ }
+ startDust(){
+  const z=this.zoning;
+  z.phase="dust"; z.t=0;
+  for(const c of z.cells) for(let i=0;i<ZONE_PARTICLES_PER_CELL;i++){
+   z.particles.push({
+    x:c.x+Math.random(), y:c.y+Math.random(), t:c.t,
+    vx:(Math.random()-0.5)*3.2, vy:-Math.random()*2.4-0.4,
+    life:ZONE_DUST_MS*(0.6+Math.random()*0.4)
+   });
+  }
+  this.events.push({e:"zonedust"});
+ }
+ tickZoning(dt){
+  const z=this.zoning;
+  z.t+=dt;
+  if(z.phase==="hold"){
+   if(z.t>=ZONE_HOLD_MS) this.startDust();
+   return;
+  }
+  for(const p of z.particles){
+   p.vy+=ZONE_DUST_GRAV*dt/1000;
+   p.x+=p.vx*dt/1000; p.y+=p.vy*dt/1000;
+   p.life-=dt;
+  }
+  if(z.t>=ZONE_DUST_MS) this.finishZoning();
+ }
+ // a fresh board, fresh score, same session: startedAt is untouched, so the
+ // run's own clock and the radio behind it never notice this happened
+ finishZoning(){
+  this.zoning=null;
+  this.board=Array.from({length:ROWS},()=>new Array(COLS).fill(null));
+  this.score=0; this.lines=0; this.level=1;
+  this.combo=-1; this.b2b=-1;
+  this.hold=null; this.holdUsed=false;
+  this.pendingGarbage=[];
+  this.stats={quad:0,tspin:0,pc:0,maxCombo:0};
+  this.events.push({e:"zonereset"});
+  this.spawn();
+ }
  win(){ if(this.over) return; this.over=true; this.won=true; this.clearing=null; this.endedAt=now(); this.events.push({e:"win"}); ; }
  // a duration measured on one machine, so it compares without sharing a clock
  lasted(){ return Math.max(0, Math.round((this.endedAt||now())-this.startedAt)); }
  outlasted(){ if(this.won) return; this.won=true; ; }
  tick(dt, input){
   if(this.over||this.paused) return;
+  if(this.zoning){ this.tickZoning(dt); return; }
   if(this.clock){
    this.left -= dt;
    if(this.left<=0){ this.left=0; this.timeout=true; this.die(); return; }
@@ -1655,6 +1728,7 @@ class Game {
  }
 }
 const LOCK_MS=500, CLEAR_MS=200;
+const ZONE_HOLD_MS=1000, ZONE_DUST_MS=850, ZONE_PARTICLES_PER_CELL=5, ZONE_DUST_GRAV=9;
 const cv=$("#cv"), ctx=cv.getContext("2d");
 let DPR=1, CW=0, CH=0;
 let L=null;
@@ -1982,22 +2056,31 @@ function drawWell(g){
  }
  ctx.save();
  ctx.beginPath(); ctx.rect(bx,by,bw,bh); ctx.clip();
- const stack = g.clearing ? g.clearing.board : g.board;
- for(let y=BUFFER;y<ROWS;y++){
-  const sy=by+(y-BUFFER)*cell;
-  for(let x=0;x<COLS;x++){
-   const c=stack[y][x]; if(!c) continue;
-   block(bx+x*cell,sy,cell,c);
+ const dusting = g.zoning && g.zoning.phase==="dust";
+ if(dusting){
+  for(const pt of g.zoning.particles){
+   const a=Math.max(0,Math.min(1,pt.life/ZONE_DUST_MS));
+   const s=cell*0.34*a+cell*0.06;
+   block(bx+pt.x*cell-s/2, by+pt.y*cell-s/2, s, pt.t, a*0.9);
   }
- }
- if(!g.over && !g.clearing && g.cur){
-  if(CFG.ghost){
-   const gy=g.ghostY();
-   if(gy!==g.cur.y) ghostPiece(g.cur.t,g.cur.r,g.cur.x,gy,bx,by,cell);
+ }else{
+  const stack = g.clearing ? g.clearing.board : g.board;
+  for(let y=BUFFER;y<ROWS;y++){
+   const sy=by+(y-BUFFER)*cell;
+   for(let x=0;x<COLS;x++){
+    const c=stack[y][x]; if(!c) continue;
+    block(bx+x*cell,sy,cell,c);
+   }
   }
-  const lockP = g.grounded ? clamp(g.lockTimer/LOCK_MS,0,1) : 0;
-  for(const [cx,cy] of g.cells(g.cur.x,g.cur.y,g.cur.r))
-   if(cy>=BUFFER) block(bx+cx*cell,by+(cy-BUFFER)*cell,cell,g.cur.t,1-lockP*0.25);
+  if(!g.over && !g.clearing && !g.zoning && g.cur){
+   if(CFG.ghost){
+    const gy=g.ghostY();
+    if(gy!==g.cur.y) ghostPiece(g.cur.t,g.cur.r,g.cur.x,gy,bx,by,cell);
+   }
+   const lockP = g.grounded ? clamp(g.lockTimer/LOCK_MS,0,1) : 0;
+   for(const [cx,cy] of g.cells(g.cur.x,g.cur.y,g.cur.r))
+    if(cy>=BUFFER) block(bx+cx*cell,by+(cy-BUFFER)*cell,cell,g.cur.t,1-lockP*0.25);
+  }
  }
  ctx.restore();
  wellEdge(bx,by,bw,bh,cell);
@@ -2010,6 +2093,11 @@ function drawWell(g){
  if(g.paused && !g.over){
   ctx.fillStyle="rgba(10,10,12,.86)"; ctx.fillRect(bx,by,bw,bh);
   textFit(T("g_paused"),bx+bw/2,by+bh/2,TS(0.95),INK.fg,"center",600,TS(0.95)*0.16,bw*0.9);
+ }
+ if(g.zoning){
+  ctx.fillStyle="rgba(10,10,12,.5)"; ctx.fillRect(bx,by,bw,bh);   // lighter than game-over: this run has not ended
+  textFit(T("g_zone"),bx+bw/2,by+bh/2,TS(0.9),INK.fg,"center",600,TS(0.9)*0.16,bw*0.9);
+  if(g.zoning.beat) textFit(T("go_best"),bx+bw/2,by+bh/2+TS(0.55),TS(0.42),INK.dim,"center",600,TS(0.42)*0.14,bw*0.9);
  }
 }
 function drawSpeedBar(g){
@@ -4035,7 +4123,7 @@ $$(".lang").forEach(b=>{
  };
 });
 [["#s-bob","bob"],["#s-ghost","ghost"],
- ["#s-grid","grid"],["#s-swap","swap"]].forEach(([id,key])=>{
+ ["#s-grid","grid"],["#s-swap","swap"],["#s-zonemode","zoneMode"]].forEach(([id,key])=>{
  const el=$(id);
  el.classList.toggle("on",!!CFG[key]);
  el.setAttribute("aria-checked",!!CFG[key]);
