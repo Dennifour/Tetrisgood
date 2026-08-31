@@ -2278,6 +2278,12 @@ function startMatch(){
  // on last-man-standing, but you could still come out top of the pending sort
  // and take a round you were never part of
  const spectating=!!(meSeat&&meSeat.spec) || !!(rv && rv.roster && !RoomState.inRound(rv,PID));
+ // caught by a roster that froze before the spectate flag reached the host.
+ // nobody else can see that, so to them this seat is alive and never dies: the
+ // round has no last man standing, the losers wait out the tie cap and the
+ // attacks addressed here are swallowed by a well that never opens. forfeit it
+ if(RoomClient.on && spectating && meSeat && meSeat.spec && rv.roster && RoomState.inRound(rv,PID))
+  RoomClient.publishDeath(1).catch(()=>{});
  if(RoomClient.on){
   // /live and /gb are wiped by the host in callStart(), before the go event
   // that got us here: deleting this seat's own /live from here instead raced
@@ -2320,6 +2326,11 @@ function loop(t){
  rafId=requestAnimationFrame(loop);
  const dt=Math.min(64, t-lastT||16); lastT=t;
  if(G){
+  // a well can end during the countdown -- dropOut() fires the moment the tab
+  // is hidden -- and the countdown only ever drained while the well was live,
+  // so COUNT stayed above zero and resolveRound(), which waits it out, never
+  // ran again: no result card, ever, for the player it happened to
+  if(G.over && COUNT>0){ COUNT=0; startHoldEnd=0; }
   if(COUNT>0 && !G.over){
    if(G.paused) countEnd=now()+COUNT*1000;
    else{
@@ -2667,6 +2678,16 @@ const RoomState = {
 const RoomClient = {
  id:null, on:false, st:null, sub:null, chatSub:null, hbTimer:null,
  chat:[], seen:new Set(), gseq:0, gtag:"", lastGo:0, starting:0,
+ // the stream is the single source of truth for seat state, but it is a round
+ // trip away, and until the echo lands the buttons still read the old seat.
+ // that window was long enough to hit ready and then spectate into the very
+ // round the ready had just called, so the click is held here meanwhile
+ pend:{},
+ intend(o){ Object.assign(this.pend,o); UI.renderRoom(); },
+ // whatever the stream has caught up on is no longer pending
+ settle(seat){ for(const k of Object.keys(this.pend)) if(!!(seat||{})[k]===!!this.pend[k]) delete this.pend[k]; },
+ // the local seat as the buttons should read it: streamed, with the last click over it
+ myIntent(v){ return Object.assign({rdy:false,spec:false},(v.seats.find(s=>s.pid===PID)||null),this.pend); },
  view(){ return RoomState.view(this.st||RoomState.make(PID), Date.now()); },
  // a go signal is in flight, or the round it announced has just begun
  busy(){ return !!this.starting && now()-this.starting<8000; },
@@ -2711,7 +2732,7 @@ const RoomClient = {
  begin(id){
   this.id=id; this.on=true;
   this.st=RoomState.make(PID); this.st.id=id;
-  this.chat=[]; this.seen=new Set(); this.gseq=0; this.lastGo=0; this.starting=0;
+  this.chat=[]; this.seen=new Set(); this.gseq=0; this.lastGo=0; this.starting=0; this.pend={};
   this.gtag=Date.now().toString(36);
   this.sub=Sig.stream(this.path(),ev=>this.onEvent(ev),()=>UI.streamDead());
   this.openChat(id);
@@ -2721,12 +2742,20 @@ const RoomClient = {
   if(!this.on) return;
   RoomState.apply(this.st,ev);
   const v=this.view();
-  if(!v.seats.some(s=>s.pid===PID)){ UI.roomGone(); return; }
+  const mine=v.seats.find(s=>s.pid===PID);
+  if(!mine){ UI.roomGone(); return; }
+  this.settle(mine);
   this.onRound(v);
   UI.renderRoom();
  },
- async setReady(v){ if(this.on) await Sig.patch(this.mine(),{rdy:!!v}); },
- async setSpectating(v){ if(this.on) await Sig.patch(this.mine(),{spec:!!v, rdy:false}); },
+ async setReady(v){ return this.claim({rdy:!!v}); },
+ async setSpectating(v){ return this.claim({spec:!!v, rdy:false}); },
+ async claim(o){
+  if(!this.on) return;
+  this.intend(o);
+  try{ await Sig.patch(this.mine(),o); }
+  catch(e){ for(const k of Object.keys(o)) delete this.pend[k]; UI.renderRoom(); throw e; }
+ },
  async setRule(r){ if(this.isHost()) await Sig.patch(this.path()+"/meta",{r:r==="score"?"score":"attack"}); },
  async publishBoard(b){ if(this.on) await Sig.patch(this.path()+"/live/"+PID,b); },
  async publishDeath(ms){ if(this.on) await Sig.patch(this.path()+"/live/"+PID,{o:1,ms:ms|0}); },
@@ -2766,6 +2795,7 @@ const RoomClient = {
    this.lastGo=v.go.at;
    NET_SEED=v.go.s>>>0;
    NET_RULE=v.go.r==="score"?"score":"attack";
+   this.pend={};
    startMatch();
    // after the call, not before: startGame() used to zero this the moment it
    // was set, so a spectating host (whose G is over on arrival) walked straight
@@ -2861,10 +2891,12 @@ const RoomView = {
   const inRoom=!!v;
   // stale seats kept a crashed player on the list forever, and counted toward
   // the two that enable Ready, while the host only ever starts on fresh ones
-  const players=inRoom ? v.seats.filter(s=>s.fresh||s.pid===PID).map(s=>({
-    pid:s.pid, n:s.n, rdy:s.rdy, spec:s.spec, w:s.w,
-    battling:!!v.roster && !s.spec && !s.d && RoomState.inRound(v,s.pid)
-   }))
+  const players=inRoom ? v.seats.filter(s=>s.fresh||s.pid===PID).map(s=>{
+    // your own click counts against your own row while its echo is in flight
+    const m=s.pid===PID?Object.assign({},s,RoomClient.pend):s;
+    return {pid:s.pid, n:s.n, rdy:m.rdy, spec:m.spec, w:s.w,
+        battling:!!v.roster && !m.spec && !s.d && RoomState.inRound(v,s.pid)};
+   })
    :(Net.ready()?[{pid:PID,n:CFG.name,rdy:READY_P2P.me,w:WINS_P2P.me,battling:false},
            {pid:"peer",n:Net.peerName||T("opponent"),rdy:READY_P2P.peer,w:WINS_P2P.peer,battling:false}]:[]);
   const active=players.filter(p=>!p.spec);
@@ -2883,10 +2915,14 @@ const RoomView = {
    host.innerHTML=rows.length?rows.join(""):'<p class="empty">'+esc(T("room_empty"))+'</p>';
   }
   const mySpec=!!(me&&me.spec);
+  const myRdy=!!(me&&me.rdy);
   const btn=$("#b-ready");
-  if(btn){ btn.textContent=T(mySpec?"room_ready":(me&&me.rdy?"room_unready":"room_ready")); btn.classList.toggle("ready",!!(me&&me.rdy)); btn.disabled=active.length<2||mySpec; }
+  if(btn){ btn.textContent=T(mySpec?"room_ready":(myRdy?"room_unready":"room_ready")); btn.classList.toggle("ready",myRdy); btn.disabled=active.length<2||mySpec; }
   const specBtn=$("#b-spectate");
   if(specBtn){
+   // ready is a commitment: the host can freeze the roster around it at any
+   // moment, so the way out of the round is to un-ready, not to slip past it
+   specBtn.disabled=myRdy;
    // offered for as long as you are in a room. gating it on a live match was
    // circular: startMatch() reads the flag at the go signal, so the only window
    // the button existed in was the one where setting it changed nothing
@@ -3582,14 +3618,17 @@ $("#j-go").onclick=()=>UI.doAnswer();
 $("#j-copy").onclick=()=>UI.copy("#j-out","#j-hint");
 $("#h-in").addEventListener("paste",()=>setTimeout(()=>UI.doAccept(),60));
 $("#j-in").addEventListener("paste",()=>setTimeout(()=>UI.doAnswer(),60));
-const mySeat=()=>RoomClient.on?(RoomClient.view().seats.find(s=>s.pid===PID)||null):null;
+// what the buttons toggle is what they show: the seat as streamed, with a
+// click whose echo has not come back yet laid over it
 $("#b-ready").onclick=()=>{
- const m=mySeat();
- UI.setReady(!(RoomClient.on?!!(m&&m.rdy):READY_P2P.me));
+ if(RoomClient.on){ UI.setReady(!RoomClient.myIntent(RoomClient.view()).rdy); return; }
+ UI.setReady(!READY_P2P.me);
 };
 $("#b-spectate").onclick=()=>{
- const m=mySeat();
- UI.setSpectating(!(m&&m.spec));
+ if(!RoomClient.on) return;
+ const me=RoomClient.myIntent(RoomClient.view());
+ if(me.rdy) return;              // un-ready first; see the button's own gate
+ UI.setSpectating(!me.spec);
 };
 $$(".rule").forEach(b=>b.onclick=()=>{ ; UI.setRule(b.dataset.rule); });
 $("#b-leave").onclick=()=>{ ; UI.leaveRoom(); };
