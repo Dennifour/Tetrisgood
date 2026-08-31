@@ -156,6 +156,20 @@ const ok=(n,c,x)=>{checks++;c?console.log("  PASS  "+n):(fails++,console.log("  
   });
   ok("something is drawn in the bottom-right corner while a track is playing",corner>5,corner);
 
+  console.log("\n== now-playing text does not move with the board's bob effect ==");
+  const snap=bob=>page.evaluate(b=>{
+   FX.bob=b; FX.bobV=0;
+   render(G,FOES);   // matches the real call site in loop()
+   const c=document.createElement("canvas"); c.width=cv.width; c.height=cv.height;
+   c.getContext("2d").drawImage(cv,0,0);
+   return Array.from(c.getContext("2d").getImageData(Math.max(0,cv.width-140),Math.max(0,cv.height-40),140,40).data);
+  },bob);
+  const flat=await snap(0);
+  const bobbed=await snap(0.6);   // a hard-drop-sized shove, well past what BOB_DAMP ever leaves on screen
+  await page.evaluate(()=>{ FX.bob=0; FX.bobV=0; });
+  ok("the corner is pixel-identical whether or not the board is bobbing",
+    flat.length===bobbed.length && flat.every((v,i)=>v===bobbed[i]));
+
   console.log("\n== game over: music keeps playing ==");
   await page.evaluate(()=>{ G.die(); });
   await page.waitForFunction(()=>G && G.over,{timeout:8000});

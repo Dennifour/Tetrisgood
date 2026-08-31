@@ -1954,6 +1954,9 @@ function render(g, opp){
  if(COUNT>0 && g===G) drawCountdown();
  else if(startHoldEnd && g===G) drawStartText();
  drawBanners();
+ // undoes FX.bob's translate, not the DPR scale -- the now-playing text is
+ // a fixed readout, not part of the board, and should not bounce with it
+ ctx.setTransform(DPR,0,0,DPR,0,0);
  drawRadioNow();
  ctx.setTransform(1,0,0,1,0,0);
 }
