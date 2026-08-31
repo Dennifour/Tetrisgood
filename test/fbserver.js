@@ -76,6 +76,12 @@ http.createServer((req,res)=>{
   }
   const path=u.pathname.slice(3).replace(/\.json$/,"");
   const parts=seg(path);
+  // NOSTREAM=1 refuses EventSource the way a database whose REST streaming
+  // endpoint a browser cannot reach does -- Firebase's own SDK uses WebSockets
+  // rather than this endpoint, and plain REST calls keep working throughout
+  if(process.env.NOSTREAM && (req.headers.accept||"").includes("text/event-stream")){
+    res.writeHead(403,CORS); res.end(); return;
+  }
   if((req.headers.accept||"").includes("text/event-stream")){
     res.writeHead(200,Object.assign({"content-type":"text/event-stream","cache-control":"no-cache","connection":"keep-alive"},CORS));
     res.write("event: put\ndata: "+JSON.stringify({path:"/",data:getIn(parts)})+"\n\n");

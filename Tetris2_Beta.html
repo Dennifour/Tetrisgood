@@ -2571,6 +2571,12 @@ function waitIceGatheringComplete(pc){
 }
 const HB_MS=5000, SEAT_TTL=20000, LOBBY_TTL=20000, SIG_TRIES=4, SIG_BASE_MS=120,
    LEAVE_TIMEOUT_MS=2500;
+// the fallback transport: how often a subscription re-reads its node when the
+// event stream is not delivering, how long a silent stream is given before the
+// polling starts, how many times the socket is retried, and how many failed
+// reads in a row mean the node is genuinely gone rather than the link flaky
+const ROOM_POLL_MS=700, CHAT_POLL_MS=1600, STREAM_WARMUP_MS=3000,
+   STREAM_TRIES=3, POLL_FAILS=6;
 const Sig = {
  base(){ return (CFG.fbUrl||"").trim().replace(/\/+$/,""); },
  on(){ return /^https?:\/\/.+/i.test(this.base()); },
@@ -2618,31 +2624,68 @@ const Sig = {
   }
   throw new Error(T("e_fbnet"));
  },
- stream(path,onEvent,onDead){
-  let es=null, closed=false, back=0;
+ // Seats, ready, every opponent's board and the whole chat log reach a client
+ // through here and nowhere else, so one socket that never connects looks like
+ // three unrelated bugs: an empty seat list, a READY button that stays disabled
+ // because it can see fewer than two players, and chat that appears to send and
+ // never arrive. EventSource used to be the only way in, and a connection that
+ // could not be made just retried for ever without a word. It is not a given:
+ // a database's REST streaming endpoint may not be reachable from a browser at
+ // all even while its ordinary REST calls are fine -- Firebase's own SDK uses
+ // websockets rather than this endpoint. So the stream is now an optimisation,
+ // and re-reading the node over those same ordinary REST calls is the floor.
+ polling:0,
+ stream(path,onEvent,onDead,pollMs){
+  let es=null, closed=false, tries=0, poll=0, warm=0, bad=0, got=false;
+  const clearWarm=()=>{ if(warm){ clearTimeout(warm); warm=0; } };
+  const drop=()=>{ try{ es&&es.close(); }catch(e){} es=null; };
+  const stopPoll=()=>{ if(poll){ clearInterval(poll); poll=0; Sig.polling=Math.max(0,Sig.polling-1); } };
+  // a whole-node re-read is the same shape as the snapshot a stream opens with,
+  // so it lands in the one state writer unchanged
+  const tick=()=>{
+   if(closed) return;
+   this.get(path).then(d=>{ bad=0; if(!closed) onEvent({type:"put", path:"/", data:d}); },
+    ()=>{ if(++bad>=POLL_FAILS && !closed){ closed=true; stopPoll(); drop(); if(onDead) onDead("poll"); } });
+  };
+  const startPoll=()=>{
+   if(closed||poll) return;
+   Sig.polling++;
+   poll=setInterval(tick,pollMs||ROOM_POLL_MS);
+   tick();
+  };
   const open=()=>{
    if(closed) return;
    es=new EventSource(this.url(path));
    const on=type=>es.addEventListener(type,m=>{
-    back=0;
     let d=null;
     try{ d=JSON.parse(m.data); }catch(e){ return; }
-    if(d) onEvent({type, path:String(d.path||"/"), data:d.data});
+    if(!d) return;
+    // it is delivering after all, so the polling covering for it can stand down
+    got=true; tries=0; clearWarm(); stopPoll();
+    onEvent({type, path:String(d.path||"/"), data:d.data});
    });
    on("put"); on("patch");
    // the server ends the stream with one of these; unhandled, a read the rules
    // deny left the client sitting in a room that silently never updated again
    const dead=type=>es.addEventListener(type,()=>{
-    closed=true; try{ es.close(); }catch(e){}
+    closed=true; clearWarm(); stopPoll(); drop();
     if(onDead) onDead(type);
    });
    dead("cancel"); dead("auth_revoked");
-   // back drives a shift, so it has to be capped: 1<<31 is negative and takes
-   // the retry delay with it, spinning reconnects as fast as the browser allows
-   es.onerror=()=>{ try{ es.close(); }catch(e){} if(closed) return; setTimeout(open,Math.min(4000,SIG_BASE_MS*(1<<Math.min(back++,6)))); };
+   es.onerror=()=>{
+    drop();
+    if(closed) return;
+    startPoll();                       // cover the gap before deciding to retry
+    // tries drives a shift, so it has to be capped: 1<<31 is negative and takes
+    // the retry delay with it, spinning reconnects as fast as the browser allows
+    if(++tries<=STREAM_TRIES) setTimeout(open,Math.min(4000,SIG_BASE_MS*(1<<Math.min(tries,6))));
+   };
+   // and a socket can also connect and then say nothing at all
+   clearWarm();
+   warm=setTimeout(()=>{ warm=0; if(!got) startPoll(); },STREAM_WARMUP_MS);
   };
   open();
-  return { close(){ closed=true; try{ es&&es.close(); }catch(e){} } };
+  return { close(){ closed=true; clearWarm(); stopPoll(); drop(); } };
  }
 };
 // one writer for room state: the old object was mutated from six paths
@@ -2856,7 +2899,7 @@ const RoomClient = {
     this.chat=this.foldChat(m);
    }
    UI.renderChat();
-  });
+  },null,CHAT_POLL_MS);   // chat can lag the room a little when it is polled
  },
  chatMap(){ const o={}; for(const m of this.chat) o[m.key]={n:m.n,m:m.m,at:m.at}; return o; },
  // ordered by the stamp the server put on each message. sorting on the key
